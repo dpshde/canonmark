@@ -98,7 +98,10 @@ export function startDailyRoundForPuzzle(
       guessVerseIndex: last.guessVerseIndex,
       result: {
         distance: last.distance,
-        distancePts: Math.round(last.total / (last.hintStep === 1 ? 3 : last.hintStep === 2 ? 2 : 1)),
+        distancePts: Math.round(
+          last.total / (last.hintStep === 1 ? 3 : last.hintStep === 2 ? 2 : 1)
+        ),
+        proximityBonus: 0,
         hintStep: last.hintStep as HintStep,
         multiplier: last.hintStep === 1 ? 3 : last.hintStep === 2 ? 2 : 1,
         total: last.total,

@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parseGuessText } from "../src/lib/guess-parse";
+import {
+  parseGuessText,
+  progressiveInsertText,
+  suggestGuessPassages,
+} from "../src/lib/guess-parse";
 import { verseIndexFor } from "../src/lib/books";
 
 describe("parseGuessText (grab-bcv)", () => {
@@ -36,5 +40,62 @@ describe("parseGuessText (grab-bcv)", () => {
     expect(parseGuessText("").ok).toBe(false);
     expect(parseGuessText("   ").ok).toBe(false);
     expect(parseGuessText("not a verse").ok).toBe(false);
+  });
+});
+
+describe("suggestGuessPassages (grab-bcv autocomplete)", () => {
+  it("returns empty for blank input", () => {
+    expect(suggestGuessPassages("")).toEqual([]);
+    expect(suggestGuessPassages("   ")).toEqual([]);
+  });
+
+  it("suggests books from a prefix", () => {
+    const s = suggestGuessPassages("jn");
+    expect(s.length).toBeGreaterThan(0);
+    expect(s.some((x) => x.canonical === "JHN" && x.kind === "book")).toBe(
+      true
+    );
+  });
+
+  it("suggests chapters and verses as the draft advances", () => {
+    const chapter = suggestGuessPassages("jn 3");
+    expect(chapter.some((x) => x.kind === "chapter" && x.label === "John 3")).toBe(
+      true
+    );
+    const verse = suggestGuessPassages("jn 3:");
+    expect(verse.every((x) => x.kind === "verse")).toBe(true);
+    expect(verse[0]?.label).toMatch(/^John 3:/);
+  });
+
+  it("omits the exact current token so the list only advances the draft", () => {
+    const s = suggestGuessPassages("John");
+    expect(s.every((x) => x.insertText !== "John")).toBe(true);
+  });
+
+  it("progressiveInsertText advances book/chapter drafts", () => {
+    expect(
+      progressiveInsertText({
+        kind: "book",
+        label: "John",
+        insertText: "John",
+        canonical: "JHN",
+      })
+    ).toBe("John ");
+    expect(
+      progressiveInsertText({
+        kind: "chapter",
+        label: "John 3",
+        insertText: "John 3",
+        canonical: "JHN.3",
+      })
+    ).toBe("John 3:");
+    expect(
+      progressiveInsertText({
+        kind: "verse",
+        label: "John 3:16",
+        insertText: "John 3:16",
+        canonical: "JHN.3.16",
+      })
+    ).toBe("John 3:16");
   });
 });

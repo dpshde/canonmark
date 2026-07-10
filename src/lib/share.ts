@@ -1,34 +1,66 @@
 /**
- * Wordle-class share payload for texts / group chats.
+ * Wordle-class share payload for texts / group chats — messaging-first.
  *
- * Spec (messaging-first):
- * - Self-contained body: works if only `text` survives the share sheet
- * - Line 1 carries brand + day + compact score (notification-preview legible)
- * - Blank line, then emoji narrative rows (spoiler-free, paste-native)
- * - No CTA, no "beat my score", no install beg
- * - Link-optional: default payload has no URL (avoids link-preview hijack /
- *   platforms dropping body text when `url` is present)
+ * Spec:
+ * - Self-contained pure text (works if only `text` survives the share sheet)
+ * - Line 1: brand + calendar date + total with point units
+ * - Blank line, then quiet per-verse scores
+ * - Spoiler-free, no CTA, no URL in the body
  *
- * Delivery: navigator.share({ text }) → else clipboard.writeText + "Copied".
+ * ```
+ * Versemark 12 Aug 2026 · 3600 pts
+ *
+ * 980 · 720 · 310 · 90
+ * ```
+ *
+ * Delivery: navigator.share({ text }) → else clipboard + "Copied".
  */
 import type { HintStep } from "./scoring";
-import { TOTAL_VERSES } from "./books";
+import { localDatePartsForPuzzleNumber } from "./daily";
 
 /** Public site — not embedded in the default share body. */
 export const APP_URL = "https://versemark.app";
 
+const MONTHS_SHORT = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
 export interface DailyShareRound extends Omit<SharePayload, "puzzleNumber"> {}
 
+/** Fixed English short date — deterministic across locales (share tests / archive). */
+export function formatShareDate(year: number, month: number, day: number): string {
+  const mon = MONTHS_SHORT[month - 1] ?? String(month);
+  return `${day} ${mon} ${year}`;
+}
+
+/** Puzzle number → share date label (e.g. "12 Aug 2026"). */
+export function formatShareDateForPuzzle(puzzleNumber: number): string {
+  const { year, month, day } = localDatePartsForPuzzleNumber(puzzleNumber);
+  return formatShareDate(year, month, day);
+}
+
+export function formatPoints(n: number): string {
+  return `${n} pts`;
+}
+
 /**
- * Daily multi-verse share — one string for clipboard, share sheet, and social.
+ * Daily multi-verse share.
  *
  * ```
- * Versemark 12 3600
+ * Versemark 12 Aug 2026 · 3600 pts
  *
- * ⬜⬜🔵⬜📍⬜⬜ 🟡
- * ⬜⬜⬜🔵📍⬜⬜ 🟠
- * 🎯⬜⬜⬜⬜⬜⬜ 🟡
- * ⬜🔵⬜📍⬜⬜⬜ 🔴
+ * 980 · 720 · 310 · 90
  * ```
  */
 export function buildDailyShareString(
@@ -36,57 +68,9 @@ export function buildDailyShareString(
   rounds: DailyShareRound[]
 ): string {
   const total = rounds.reduce((sum, round) => sum + round.total, 0);
-  const header = `Versemark ${puzzleNumber} ${total}`;
-  const grid = rounds.map((round) => shareRow(round)).join("\n");
-  return `${header}\n\n${grid}`;
-}
-
-/**
- * Encode distance on a 7-cell mini-timeline:
- * true position = pushpin, guess = blue circle, exact = bullseye, empty = white square.
- */
-export function distanceEmojiBand(
-  guessVerseIndex: number,
-  trueVerseIndex: number,
-  cells = 7
-): string {
-  const truePos = Math.min(
-    cells - 1,
-    Math.max(
-      0,
-      Math.round(((trueVerseIndex - 1) / (TOTAL_VERSES - 1)) * (cells - 1))
-    )
-  );
-  let guessPos = Math.min(
-    cells - 1,
-    Math.max(
-      0,
-      Math.round(((guessVerseIndex - 1) / (TOTAL_VERSES - 1)) * (cells - 1))
-    )
-  );
-  if (guessPos === truePos && guessVerseIndex !== trueVerseIndex) {
-    guessPos = Math.min(
-      cells - 1,
-      truePos + (guessVerseIndex > trueVerseIndex ? 1 : -1)
-    );
-    if (guessPos < 0) guessPos = truePos + 1;
-  }
-
-  const row: string[] = [];
-  for (let i = 0; i < cells; i++) {
-    if (i === truePos && i === guessPos) row.push("\uD83C\uDFAF"); // 🎯
-    else if (i === truePos) row.push("\uD83D\uDCCC"); // 📍
-    else if (i === guessPos) row.push("\uD83D\uDD35"); // 🔵
-    else row.push("\u2B1C"); // ⬜
-  }
-  return row.join("");
-}
-
-/** Hint ladder marker — yellow / orange / red (no hints → full hints). */
-export function hintEmoji(hintStep: HintStep): string {
-  if (hintStep === 1) return "\uD83D\uDFe1"; // 🟡
-  if (hintStep === 2) return "\uD83D\uDFE0"; // 🟠
-  return "\uD83D\uDD34"; // 🔴
+  const date = formatShareDateForPuzzle(puzzleNumber);
+  const scores = rounds.map((round) => String(round.total)).join(" \u00B7 ");
+  return `Versemark ${date} \u00B7 ${formatPoints(total)}\n\n${scores}`;
 }
 
 export interface SharePayload {
@@ -99,32 +83,23 @@ export interface SharePayload {
   hintStep: HintStep;
 }
 
-function shareRow(p: Pick<SharePayload, "guessVerseIndex" | "trueVerseIndex" | "hintStep">): string {
-  return `${distanceEmojiBand(p.guessVerseIndex, p.trueVerseIndex)} ${hintEmoji(p.hintStep)}`;
-}
-
 /**
  * Single-round / practice share.
  *
- * ```
- * Versemark 1500
- *
- * ⬜⬜🔵⬜📍⬜⬜ 🟡
- * ```
- *
- * Practice omits the day index; daily single-round (if used) includes it.
+ * Daily-flavored: `Versemark 12 Aug 2026 · 1500 pts`
+ * Practice: `Versemark · 1500 pts`
  */
 export function buildShareString(p: SharePayload): string {
+  const pts = formatPoints(p.total);
   const header =
     p.puzzleNumber != null
-      ? `Versemark ${p.puzzleNumber} ${p.total}`
-      : `Versemark ${p.total}`;
-  return `${header}\n\n${shareRow(p)}`;
+      ? `Versemark ${formatShareDateForPuzzle(p.puzzleNumber)} \u00B7 ${pts}`
+      : `Versemark \u00B7 ${pts}`;
+  return `${header}\n\n${p.total}`;
 }
 
 /**
- * Share via OS sheet when available (text-only — no `url` field, so
- * Messages/WhatsApp keep the grid as the message body).
+ * Share via OS sheet when available (text-only — no `url` field).
  * Otherwise copy to clipboard.
  */
 export async function shareText(text: string): Promise<"shared" | "copied"> {
@@ -133,7 +108,6 @@ export async function shareText(text: string): Promise<"shared" | "copied"> {
       await navigator.share({ text });
       return "shared";
     } catch (err) {
-      // User cancelled the sheet — not an error worth falling back for.
       if (err instanceof DOMException && err.name === "AbortError") {
         throw err;
       }

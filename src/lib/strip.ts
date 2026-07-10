@@ -9,11 +9,11 @@ import {
   type Orientation,
   type ZoomPreset,
   FULL_CANON_SPAN,
+  OT_END,
   bookSegments,
   verseToAxisPx,
   hitTestVerse,
   clampVerse,
-  clampViewportToCanon,
   defaultViewport,
   defaultSpanForOrientation,
   panViewport,
@@ -21,6 +21,7 @@ import {
   zoomViewport,
   viewportForZoomPreset,
   viewportForPrecision,
+  viewportForRange,
   viewportFullCanon,
 } from "./axis";
 import {
@@ -36,6 +37,7 @@ import { hapticLight, hapticSelection } from "./haptics";
 const ACCENT = "#b85a20";
 const ACCENT_DEEP = "#8f4516";
 const SUCCESS = "#5a8a3a";
+const SUCCESS_DEEP = "#3f6a28";
 const INK = "#2f2a25";
 const INK_2 = "#6e655a";
 const INK_3 = "#9a9088";
@@ -226,13 +228,39 @@ export class CanonStrip {
     this.stopViewportAnimation();
     this.state.trueVerse = clampVerse(trueVerseIndex);
     this.state.revealed = true;
-    this.syncAccessibility();
-    // Frame only guess ↔ true with tight padding (not a wide book neighborhood)
-    this.centerOnResult(
+    // Zoom to the testament that holds the answer (OT or NT). Cross-testament
+    // misses open the full canon so both markers stay on the map.
+    this.prePrecisionViewport = null;
+    this.state.viewport = this.viewportForResult(
       this.state.lockedGuess ?? this.state.trueVerse,
       this.state.trueVerse
     );
+    this.onFreeViewChange?.();
+    this.syncAccessibility();
     this.startRevealAnimation();
+    this.render();
+  }
+
+  /**
+   * Result framing by testament: OT or NT for same-side guesses; full canon
+   * when guess and truth straddle the seam (so both markers remain visible).
+   */
+  private viewportForResult(guess: number, truth: number): Viewport {
+    const guessOt = guess <= OT_END;
+    const truthOt = truth <= OT_END;
+    if (guessOt === truthOt) {
+      return viewportForZoomPreset(
+        this.state.viewport,
+        truthOt ? "ot" : "nt"
+      );
+    }
+    // Cross-testament miss — show the whole span covering both pins
+    return viewportForRange(
+      this.state.viewport,
+      Math.min(guess, truth),
+      Math.max(guess, truth),
+      { pad: 1.06, minSpan: 400 }
+    );
   }
 
   resetForRound(): void {
@@ -272,21 +300,48 @@ export class CanonStrip {
     this.animFrame = requestAnimationFrame(tick);
   }
 
-  /**
-   * Result view: zoom so guess and truth fill most of the rail with modest padding.
-   * Zero-distance still shows a small neighborhood for context.
-   */
-  private centerOnResult(guess: number, truth: number): void {
-    const lo = Math.min(guess, truth);
-    const hi = Math.max(guess, truth);
-    const gap = Math.max(1, hi - lo);
-    // ~20% padding each side; min span keeps a perfect hit from collapsing to a point
-    const span = Math.min(FULL_CANON_SPAN, Math.max(gap * 1.4, 36));
-    this.state.viewport = clampViewportToCanon({
-      ...this.state.viewport,
-      center: (lo + hi) / 2,
-      span,
-    });
+  /** Ease the viewport toward a target (span + center). Snaps under reduced motion. */
+  private animateToViewport(target: Viewport): void {
+    const from = this.state.viewport;
+    this.stopViewportAnimation();
+
+    if (
+      Math.abs(from.span - target.span) < 1 &&
+      Math.abs(from.center - target.center) < 0.5
+    ) {
+      this.state.viewport = target;
+      this.onFreeViewChange?.();
+      this.render();
+      return;
+    }
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      this.state.viewport = target;
+      this.onFreeViewChange?.();
+      this.render();
+      return;
+    }
+
+    const started = performance.now();
+    const tick = (now: number): void => {
+      const raw = Math.min(1, (now - started) / PRECISION_ZOOM_MS);
+      const eased = easeOutCubic(raw);
+      this.state.viewport = {
+        ...from,
+        center: from.center + (target.center - from.center) * eased,
+        span: from.span + (target.span - from.span) * eased,
+      };
+      this.render();
+      if (raw < 1) {
+        this.viewportAnimFrame = requestAnimationFrame(tick);
+      } else {
+        this.state.viewport = target;
+        this.viewportAnimFrame = 0;
+        this.onFreeViewChange?.();
+        this.render();
+      }
+    };
+    this.viewportAnimFrame = requestAnimationFrame(tick);
   }
 
   /* ———— Input binding ———— */
@@ -507,38 +562,8 @@ export class CanonStrip {
 
   /** Transition from broad canon placement into a verse-resolvable ruler. */
   private autoZoomForPrecision(focusVerse: number): void {
-    const from = this.state.viewport;
-    const target = viewportForPrecision(from, focusVerse);
-    this.prePrecisionViewport = { ...from };
-    this.stopViewportAnimation();
-
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      this.state.viewport = target;
-      this.onFreeViewChange?.();
-      this.render();
-      return;
-    }
-
-    const started = performance.now();
-    const tick = (now: number): void => {
-      const raw = Math.min(1, (now - started) / PRECISION_ZOOM_MS);
-      const eased = easeOutCubic(raw);
-      this.state.viewport = {
-        ...from,
-        center: from.center + (target.center - from.center) * eased,
-        span: from.span + (target.span - from.span) * eased,
-      };
-      this.render();
-      if (raw < 1) {
-        this.viewportAnimFrame = requestAnimationFrame(tick);
-      } else {
-        this.state.viewport = target;
-        this.viewportAnimFrame = 0;
-        this.onFreeViewChange?.();
-        this.render();
-      }
-    };
-    this.viewportAnimFrame = requestAnimationFrame(tick);
+    this.prePrecisionViewport = { ...this.state.viewport };
+    this.animateToViewport(viewportForPrecision(this.state.viewport, focusVerse));
   }
 
   private stopViewportAnimation(): void {
@@ -750,11 +775,12 @@ export class CanonStrip {
     this.drawBackground(w, h);
     // Always keep genre-tinted segments — they orient you on the close-up
     this.drawBookSegments(w, h);
+    // Result: keep seam + edge labels when visible for orientation.
+    // Book names stay off so marker labels aren't crowded.
+    this.drawSeam(w, h);
+    this.drawEdgeLabels(w, h);
     if (!resultView) {
-      // Result view: no book names / edge chrome (markers carry the labels)
-      this.drawSeam(w, h);
       this.drawBookLabels(w, h);
-      this.drawEdgeLabels(w, h);
     }
 
     if (resultView && this.state.trueVerse != null) {
@@ -1173,21 +1199,32 @@ export class CanonStrip {
   ): void {
     const { ctx } = this;
     const p = this.railPoint(ch, w, h);
+    const result = this.state.revealed;
 
     ctx.fillStyle = ACCENT;
-    diamond(ctx, p.x, p.y, lifted ? 8 : 6);
+    diamond(ctx, p.x, p.y, result ? 9 : lifted ? 8 : 6);
     ctx.fill();
+    if (result) {
+      // White inner ring so the pin reads against the rail
+      ctx.strokeStyle = BG;
+      ctx.lineWidth = 1.5;
+      diamond(ctx, p.x, p.y, 9);
+      ctx.stroke();
+      ctx.fillStyle = ACCENT;
+      diamond(ctx, p.x, p.y, 6.5);
+      ctx.fill();
+    }
 
     if (withLabel) {
-      if (this.state.revealed) {
-        this.drawMarkerLabel(
+      if (result) {
+        this.drawResultLabel(
           formatVerseLabel(ch),
+          "You",
           p,
           w,
           h,
           ACCENT_DEEP,
-          labelSide,
-          lifted
+          labelSide
         );
       } else {
         this.drawSelectionLabel(formatVerseLabel(ch), p, lifted);
@@ -1235,12 +1272,27 @@ export class CanonStrip {
     ctx.save();
     ctx.globalAlpha = k;
     ctx.fillStyle = SUCCESS;
-    diamond(ctx, p.x, p.y, 6 + 2 * (1 - k));
+    diamond(ctx, p.x, p.y, 9 + 2 * (1 - k));
+    ctx.fill();
+    ctx.strokeStyle = BG;
+    ctx.lineWidth = 1.5;
+    diamond(ctx, p.x, p.y, 9);
+    ctx.stroke();
+    ctx.fillStyle = SUCCESS;
+    diamond(ctx, p.x, p.y, 6.5);
     ctx.fill();
     ctx.restore();
 
     if (k > 0.5) {
-      this.drawMarkerLabel(formatVerseLabel(ch), p, w, h, SUCCESS, labelSide);
+      this.drawResultLabel(
+        formatVerseLabel(ch),
+        "True",
+        p,
+        w,
+        h,
+        SUCCESS_DEEP,
+        labelSide
+      );
     }
   }
 
@@ -1281,56 +1333,96 @@ export class CanonStrip {
     ctx.restore();
   }
 
-  private drawMarkerLabel(
-    label: string,
+  /**
+   * Result-page callout: role caption + verse ref, large enough to read at
+   * a glance against the rail (selected = terracotta, actual = olive).
+   */
+  private drawResultLabel(
+    verseLabel: string,
+    role: string,
     p: Point,
     w: number,
     h: number,
-    color: string,
-    side: "above" | "below" = "above",
-    lifted = false
+    ink: string,
+    side: "above" | "below" = "above"
   ): void {
     const { ctx } = this;
     const free = this.freeAxis();
     const isV = this.state.viewport.orientation === "vertical";
-    ctx.save();
-    ctx.font = `600 ${lifted ? 12 : 10}px ${SERIF}`;
-    setLetterSpacing(ctx, "0.5px");
-    const text = label.toUpperCase();
-    const metrics = ctx.measureText(text);
-    const pad = 5,
-      bw = metrics.width + pad * 2,
-      bh = lifted ? 22 : 16;
-    let bx = p.x - bw / 2;
-    let by = side === "above" ? p.y - (lifted ? 54 : 24) : p.y + 12;
+    const ref = verseLabel.toUpperCase();
+    const roleText = role.toUpperCase();
 
-    // Clamp into free band so labels never sit under header/footer chrome
+    ctx.save();
+    ctx.font = `700 13px ${SERIF}`;
+    setLetterSpacing(ctx, "0.3px");
+    const refW = ctx.measureText(ref).width;
+    ctx.font = `600 9px ${SERIF}`;
+    setLetterSpacing(ctx, "0.8px");
+    const roleW = ctx.measureText(roleText).width;
+
+    const padX = 12;
+    const padY = 8;
+    const gap = 3;
+    const roleH = 11;
+    const refH = 16;
+    const bw = Math.max(refW, roleW) + padX * 2;
+    const bh = padY * 2 + roleH + gap + refH;
+    const stem = 14;
+
+    let bx = p.x - bw / 2;
+    let by = side === "above" ? p.y - bh - stem : p.y + stem;
+
     if (isV) {
       const minY = free.origin + 2;
       const maxY = free.origin + free.length - bh - 2;
-      if (by < minY) by = p.y + 12;
-      if (by > maxY) by = p.y - 24;
+      if (by < minY) by = p.y + stem;
+      if (by > maxY) by = p.y - bh - stem;
       by = Math.min(maxY, Math.max(minY, by));
     } else {
-      if (by < 4) by = p.y + 12;
-      if (by + bh > h - 4) by = p.y - 24;
+      if (by < 4) by = p.y + stem;
+      if (by + bh > h - 4) by = p.y - bh - stem;
       const minX = free.origin + 2;
       const maxX = free.origin + free.length - bw - 2;
       bx = Math.min(maxX, Math.max(minX, bx));
     }
     bx = Math.min(Math.max(4, bx), w - bw - 4);
 
+    // Transparent chip + strong border (page bg shows through)
     ctx.fillStyle = BG;
-    roundedRect(ctx, bx, by, bw, bh, 3);
+    roundedRect(ctx, bx, by, bw, bh, 5);
     ctx.fill();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1;
-    roundedRect(ctx, bx, by, bw, bh, 3);
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = 1.75;
+    roundedRect(ctx, bx, by, bw, bh, 5);
     ctx.stroke();
-    ctx.fillStyle = color;
+
+    // Short stem toward the pin
+    const stemX = Math.min(Math.max(p.x, bx + 8), bx + bw - 8);
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    if (side === "above" || by + bh < p.y) {
+      ctx.moveTo(stemX, by + bh);
+      ctx.lineTo(p.x, p.y - 10);
+    } else {
+      ctx.moveTo(stemX, by);
+      ctx.lineTo(p.x, p.y + 10);
+    }
+    ctx.stroke();
+
+    const cx = bx + bw / 2;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(text, bx + bw / 2, by + bh / 2 + 0.5);
+    ctx.fillStyle = ink;
+    ctx.font = `600 9px ${SERIF}`;
+    setLetterSpacing(ctx, "0.9px");
+    ctx.globalAlpha = 0.85;
+    ctx.fillText(roleText, cx, by + padY + roleH / 2);
+    ctx.globalAlpha = 1;
+    ctx.font = `700 13px ${SERIF}`;
+    setLetterSpacing(ctx, "0.25px");
+    ctx.fillText(ref, cx, by + padY + roleH + gap + refH / 2 + 0.5);
+
     setLetterSpacing(ctx, "0px");
     ctx.restore();
   }
@@ -1368,7 +1460,7 @@ export class CanonStrip {
     );
   }
 
-  /* ———— 9. Connector line ———— */
+  /* ———— 9. Distance connector (guess → truth) ———— */
 
   private drawConnector(guess: number, truth: number, w: number, h: number): void {
     const { ctx } = this;
@@ -1378,9 +1470,10 @@ export class CanonStrip {
     const from = this.railPoint(guess, w, h);
     const to = this.railPoint(toCh, w, h);
     ctx.save();
-    ctx.strokeStyle = INK_2;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = INK;
+    ctx.globalAlpha = 0.72;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([3, 4]);
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
     ctx.lineTo(to.x, to.y);

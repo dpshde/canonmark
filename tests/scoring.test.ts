@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
+  CLOSE_BONUS,
+  CLOSE_DISTANCE,
   distancePoints,
+  EXACT_BONUS,
   hintMultiplier,
+  proximityBonus,
   scoreRound,
   verseDistance,
   SCORE_HALF_LIFE,
@@ -31,6 +35,26 @@ describe(`distancePoints (half-life ${SCORE_HALF_LIFE} verses)`, () => {
   });
 });
 
+describe("proximityBonus", () => {
+  it("exact hit earns the full exact bonus", () => {
+    expect(proximityBonus(0)).toBe(EXACT_BONUS);
+  });
+
+  it(`within ${CLOSE_DISTANCE} verses earns the close bonus`, () => {
+    expect(proximityBonus(1)).toBe(CLOSE_BONUS);
+    expect(proximityBonus(CLOSE_DISTANCE)).toBe(CLOSE_BONUS);
+  });
+
+  it("exact beats close", () => {
+    expect(EXACT_BONUS).toBeGreaterThan(CLOSE_BONUS);
+  });
+
+  it("beyond the close band earns nothing", () => {
+    expect(proximityBonus(CLOSE_DISTANCE + 1)).toBe(0);
+    expect(proximityBonus(100)).toBe(0);
+  });
+});
+
 describe("hintMultiplier", () => {
   it("step 1 → ×3", () => expect(hintMultiplier(1)).toBe(3));
   it("step 2 → ×2", () => expect(hintMultiplier(2)).toBe(2));
@@ -38,18 +62,36 @@ describe("hintMultiplier", () => {
 });
 
 describe("scoreRound", () => {
-  it("perfect ×3 = 3000", () => {
+  it("perfect ×3 includes exact bonus → 4500", () => {
     const r = scoreRound(5000, 5000, 1);
     expect(r.distance).toBe(0);
     expect(r.distancePts).toBe(1000);
+    expect(r.proximityBonus).toBe(EXACT_BONUS);
     expect(r.multiplier).toBe(3);
-    expect(r.total).toBe(3000);
+    expect(r.total).toBe((1000 + EXACT_BONUS) * 3);
   });
 
-  it("d=half-life with step 2 → 500×2=1000", () => {
+  it("within 5 ×3 includes close bonus", () => {
+    const r = scoreRound(5000, 5003, 1);
+    expect(r.distance).toBe(3);
+    expect(r.proximityBonus).toBe(CLOSE_BONUS);
+    expect(r.total).toBe((r.distancePts + CLOSE_BONUS) * 3);
+    expect(r.total).toBeGreaterThan(1000 * 3);
+    expect(r.total).toBeLessThan((1000 + EXACT_BONUS) * 3);
+  });
+
+  it("d=6 has no proximity bonus", () => {
+    const r = scoreRound(5000, 5006, 1);
+    expect(r.distance).toBe(6);
+    expect(r.proximityBonus).toBe(0);
+    expect(r.total).toBe(r.distancePts * 3);
+  });
+
+  it("d=half-life with step 2 → 500×2=1000 (no close bonus)", () => {
     const r = scoreRound(1000, 1000 + SCORE_HALF_LIFE, 2);
     expect(r.distance).toBe(SCORE_HALF_LIFE);
     expect(r.distancePts).toBe(500);
+    expect(r.proximityBonus).toBe(0);
     expect(r.total).toBe(1000);
   });
 

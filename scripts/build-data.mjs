@@ -217,6 +217,12 @@ const POOL_ALLOWLIST = [
   "DEU.6.5",
   "MAL.3.10",
   "PHP.4.8",
+  // Maintainer favorites (exact BSB where available)
+  "PRO.16.9",
+  "PSA.119.11",
+  "1CO.5.12",
+  "PSA.23.2",
+  "LUK.8.24", // storm pericope; 8.22–25 not fully in BSB subset
 ];
 
 function resolvePath(candidates) {
@@ -665,6 +671,10 @@ function buildPool(rankingsPath, books, bsb, paraData) {
     };
   }
 
+  // Provenance guard: every shipped string must be an exact BSB copy.
+  // Text is only ever assigned via bsb.get(...); this re-checks before write.
+  assertTextsAreBsb(verses, paragraphs, bsb, selected);
+
   return {
     pool: selected.map(
       ({
@@ -698,6 +708,39 @@ function buildPool(rankingsPath, books, bsb, paraData) {
   };
 }
 
+/** Fail the build if any verse/paragraph text is not an exact BSB string. */
+function assertTextsAreBsb(verses, paragraphs, bsb, selected) {
+  const failures = [];
+  for (const [key, text] of Object.entries(verses)) {
+    if (!bsb.has(key)) {
+      failures.push(`${key}: not present in BSB source`);
+      continue;
+    }
+    if (bsb.get(key) !== text) {
+      failures.push(`${key}: shipped text ≠ BSB source`);
+    }
+  }
+  for (const [anchor, para] of Object.entries(paragraphs)) {
+    const [book, ch] = anchor.split(".");
+    for (const { v, t } of para.verses || []) {
+      const key = `${book}.${ch}.${v}`;
+      if (!bsb.has(key) || bsb.get(key) !== t) {
+        failures.push(`paragraph ${anchor} v${v}: not exact BSB`);
+      }
+    }
+  }
+  for (const item of selected) {
+    if (!bsb.has(item.ref) || !verses[item.ref]) {
+      failures.push(`pool ${item.ref}: missing BSB-backed text`);
+    }
+  }
+  if (failures.length) {
+    throw new Error(
+      `BSB provenance check failed (${failures.length}):\n  - ${failures.slice(0, 10).join("\n  - ")}`
+    );
+  }
+}
+
 function main() {
   const rankingsPath = resolvePath([
     path.join(
@@ -722,7 +765,7 @@ function main() {
   }
 
   console.log("rankings:", rankingsPath);
-  console.log("bsb:", bsbPath);
+  console.log("bsb (Berean Standard Bible):", bsbPath);
   console.log("para:", paraPath);
 
   fs.mkdirSync(outDir, { recursive: true });
@@ -776,6 +819,9 @@ function main() {
 
   console.log(
     `Wrote ${books.length} books (${totalVerses} verses), pool ${pool.length}, verses ${Object.keys(verses).length}, paragraphs ${Object.keys(paragraphs).length}`
+  );
+  console.log(
+    `BSB provenance: OK — all ${Object.keys(verses).length} verse strings and ${Object.keys(paragraphs).length} paragraphs are exact copies from bsb.browser.jsonl`
   );
   console.log("Out:", outDir);
 }

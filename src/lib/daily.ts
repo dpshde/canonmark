@@ -70,6 +70,26 @@ export function puzzleNumberFromDateString(isoDate: string): number {
   );
 }
 
+/** Inverse of puzzleNumberForLocalDate — calendar day for puzzle N (epoch = #1). */
+export function localDatePartsForPuzzleNumber(n: number): {
+  year: number;
+  month: number;
+  day: number;
+} {
+  const epochUtc = Date.UTC(
+    DAILY_EPOCH.year,
+    DAILY_EPOCH.month - 1,
+    DAILY_EPOCH.day
+  );
+  const dateUtc = epochUtc + (n - 1) * 86_400_000;
+  const d = new Date(dateUtc);
+  return {
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+  };
+}
+
 function weightedPick(
   items: PoolItem[],
   rand: () => number,

@@ -21,16 +21,24 @@ Scoring must reward two distinct skills: precision (how close the placed star la
 
 ## Decision Outcome
 
-Chosen option: **distance points x hint multiplier**.
+Chosen option: **(distance points + proximity bonus) × hint multiplier**.
 
-Distance points (0-1000): computed from chapter distance between guess and truth on the canonical axis of 1,189 chapters, with a generous exponential falloff:
+Distance points (0-1000): computed from verse distance between guess and truth on the 31,102-verse axis, with a generous exponential falloff (half-life 1000 verses, preserving the original ~40-chapter feel):
 
 ```text
-d      = |guessChapterIndex - trueChapterIndex|   // indices 1..1189 in canonical order
-points = round(1000 * 0.5^(d / 40))               // half-life: 40 chapters
+d    = |guessVerseIndex - trueVerseIndex|
+base = round(1000 * 0.5^(d / 1000))
 ```
 
-Reference values: d=0 -> 1000, d=1 -> 983, d=10 -> 841, d=40 -> 500, d=80 -> 250, d=150 -> 74, d=300 -> 6, d>=~440 -> 0. The 40-chapter half-life means landing anywhere in the right neighborhood of a large book still scores solidly, while cross-testament misses fall to near zero. All-integer, deterministic, and identical on every client.
+Proximity bonuses (added to base, then multiplied by the hint ladder) reward nail-it precision beyond the smooth curve:
+
+| Band | Bonus |
+| --- | --- |
+| Exact (d = 0) | +500 |
+| Close (d = 1..5) | +350 |
+| Otherwise | +0 |
+
+Reference base values: d=0 -> 1000, d=half-life -> 500, d=2×half-life -> 250. Exact no-hint max is (1000+500)×3 = 4500. All-integer, deterministic, and identical on every client.
 
 Hint ladder (three steps, per prior decision):
 
@@ -49,7 +57,7 @@ Testament halves are fixed, book-aligned quadrants of the canonical axis (chapte
 | NT, first half (Gospels and Acts) | Matthew-Acts | 930-1046 |
 | NT, second half (Epistles and Revelation) | Romans-Revelation | 1047-1189 |
 
-The player may take hints before placing the star; the multiplier locks at the last hint taken. Max round score: 3000.
+The player may take hints before placing the star; the multiplier locks at the last hint taken. Max round score: 4500 (exact, no hints).
 
 Distance-only was rejected because it ignores the hint ladder that makes the game trainable (players could always max out hints for free). Ladder-only was rejected because it wastes the timeline's continuous distance signal.
 

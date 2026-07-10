@@ -40,6 +40,7 @@
 
   --z-board: 0;
   --z-hud: 2;
+  --z-dropdown: 4;
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --dur-fast: 0.15s;
@@ -574,6 +575,17 @@ button:disabled {
   margin-inline: auto;
 }
 
+/* Home translation credit — quiet, not attached to verse text */
+.home-panel .attribution {
+  margin: var(--space-xl) 0 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  opacity: 0.75;
+}
+
 /* Dock — hints under the rail, then status + actions */
 .dock {
   display: flex;
@@ -623,6 +635,7 @@ button:disabled {
 
 /* Guess field — type a ref (grab-bcv) or receive timeline taps */
 .guess-field {
+  position: relative;
   width: 100%;
 }
 
@@ -677,6 +690,85 @@ button:disabled {
   border-bottom-color: var(--error);
 }
 
+/* Passage autocomplete — type list, same voice as the field (no SaaS card) */
+.guess-suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* Mobile: open upward so the dock stays clear */
+  bottom: 100%;
+  z-index: var(--z-dropdown);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: min(40vh, 14rem);
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-xs) 0;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 2px 2px 0 0;
+  background: var(--bg);
+  text-align: center;
+}
+
+.guess-suggestions[hidden] {
+  display: none;
+}
+
+/* Shared frame: input + list read as one flush box when open */
+.guess-field:has(.guess-suggestions:not([hidden])) .guess-input {
+  border-inline: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.guess-field:has(.guess-suggestions:not([hidden])).is-valid .guess-input,
+.guess-field:has(.guess-suggestions:not([hidden])) .guess-input:focus {
+  border-bottom-color: var(--border);
+}
+
+.guess-suggestion {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 1.04rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+
+.guess-suggestion:hover,
+.guess-suggestion.is-active {
+  background: var(--surface-2);
+  color: var(--accent-deep);
+}
+
+.guess-suggestion-label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guess-suggestion {
+    transition: none;
+  }
+}
+
 @media (min-width: 720px) {
   .verse-band {
     margin-top: var(--space-3xl);
@@ -701,6 +793,20 @@ button:disabled {
   .guess-tools:has(.precision-zoom-out:not([hidden])) .guess-input {
     padding-inline: var(--space-md);
   }
+
+  /* Wide: list hugs under the input, continuous side borders */
+  .guess-suggestions {
+    top: 100%;
+    bottom: auto;
+    border-top: 0;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0 0 2px 2px;
+  }
+
+  .guess-field:has(.guess-suggestions:not([hidden])) .guess-input {
+    border-top: 1px solid var(--border);
+    border-radius: 2px 2px 0 0;
+  }
 }
 
 .actions {
@@ -722,19 +828,22 @@ button:disabled {
   width: 100%;
 }
 
-/* Result — score + one meta line + action row; refs live on the rail */
+/* Result — confident score, plain-language outcome, one action row */
 .result-panel {
   text-align: center;
   animation: fadeRise var(--dur-mid) var(--ease-out) both;
-  padding: var(--space-sm) 0 0;
+  padding: var(--space-md) 0 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-xs);
+  align-items: center;
+  gap: var(--space-sm);
 }
 
 .daily-summary {
   list-style: none;
-  margin: var(--space-md) 0 0;
+  width: 100%;
+  max-width: 22rem;
+  margin: var(--space-sm) 0 0;
   padding: 0;
   border-top: 1px solid var(--border);
 }
@@ -751,31 +860,69 @@ button:disabled {
 
 .result-panel .score-line {
   margin: 0;
-  font-size: 1.65rem;
+  font-size: clamp(2.15rem, 6.5vw, 2.85rem);
   font-weight: 700;
   color: var(--ink);
-  letter-spacing: -0.01em;
-  line-height: 1.1;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  font-variant-numeric: lining-nums tabular-nums;
+  animation: scoreSettle 0.45s var(--ease-out) both;
+  animation-delay: 0.08s;
+}
+
+.result-panel .score-line.is-exact {
+  color: var(--accent-deep);
 }
 
 .result-panel .score-line .pts-unit {
-  font-size: 0.48em;
-  font-weight: 400;
+  font-size: 0.36em;
+  font-weight: 600;
   color: var(--ink-3);
-  letter-spacing: 0.03em;
-  margin-left: 0.15em;
+  letter-spacing: 0.06em;
+  font-variant-caps: all-small-caps;
+  margin-left: 0.22em;
+  vertical-align: 0.35em;
+}
+
+.result-panel .score-line.is-exact .pts-unit {
+  color: var(--accent);
 }
 
 .result-panel .score-meta {
   margin: 0;
-  font-size: 0.86rem;
-  color: var(--ink-3);
+  max-width: 28ch;
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--ink-2);
+  animation: fadeRise var(--dur-mid) var(--ease-out) both;
+  animation-delay: 0.14s;
+}
+
+@keyframes scoreSettle {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .result-panel .score-line,
+  .result-panel .score-meta {
+    animation: none;
+  }
 }
 
 .result-actions {
   display: flex;
   gap: var(--space-sm);
-  margin-top: var(--space-sm);
+  margin-top: var(--space-md);
+  width: 100%;
+  max-width: 22rem;
   align-items: stretch;
 }
 

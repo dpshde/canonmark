@@ -232,13 +232,11 @@ export function scrubVersesPerSecond(span: number, holdMs: number): number {
 }
 
 /**
- * Default zoom for portrait/mobile: ~1/12 of the canon (~2.5k verses).
- * Wide/desktop keeps the full overview so the map reads at a glance.
+ * Default zoom: full-canon overview on every orientation so the map
+ * reads at a glance; players zoom in when placing.
  */
-export const DEFAULT_MOBILE_SPAN = Math.round(TOTAL_VERSES / 12);
-
-export function defaultSpanForOrientation(orientation: Orientation): number {
-  return orientation === "vertical" ? DEFAULT_MOBILE_SPAN : FULL_CANON_SPAN;
+export function defaultSpanForOrientation(_orientation: Orientation): number {
+  return FULL_CANON_SPAN;
 }
 
 export function defaultViewport(

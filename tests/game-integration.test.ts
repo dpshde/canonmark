@@ -88,11 +88,12 @@ describe("full round flow", () => {
     }
     const share = shareForRound(final);
     expect(share).not.toBeNull();
-    // Wordle-class: "Versemark {N} {total}" then blank line then 4 emoji rows
-    expect(share!.startsWith(`Versemark ${n} `)).toBe(true);
-    expect(share!.split("\n\n")[1].split("\n")).toHaveLength(4);
+    // "Versemark 15 Aug 2026 · {total} pts" then score line
+    expect(share!).toContain("Versemark 15 Aug 2026 · ");
+    expect(share!).toContain(" pts\n\n");
+    const body = share!.split("\n\n")[1];
+    expect(body.split(" \u00B7 ")).toHaveLength(4);
     expect(share).not.toContain("http");
-    expect(share).not.toContain("Score to beat");
   });
 
   it("endless produces a playable round from pool", () => {

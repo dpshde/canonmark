@@ -1,13 +1,20 @@
 /**
  * Parse free-text Bible references into canon verse indices via grab-bcv.
+ * Autocomplete mirrors the passage pickers in type-the-word / route-bible.
  */
-import { tryParsePassage } from "grab-bcv";
+import {
+  autocompletePassage,
+  tryParsePassage,
+  type AutocompletePassageSuggestion,
+  type OsisBookCode,
+} from "grab-bcv";
 import { verseIndexFor, formatVerseLabel } from "./books";
-import type { OsisBookCode } from "grab-bcv";
 
 export type GuessParseResult =
   | { ok: true; verseIndex: number; label: string; input: string }
   | { ok: false; reason: "empty" | "invalid" | "out_of_range"; input: string };
+
+export type GuessSuggestion = AutocompletePassageSuggestion;
 
 /**
  * Parse a typed reference into a global verse index.
@@ -35,4 +42,29 @@ export function parseGuessText(raw: string): GuessParseResult {
     label: formatVerseLabel(verseIndex),
     input,
   };
+}
+
+/**
+ * Passage autocomplete for the guess field (grab-bcv).
+ * Drops the exact-current-token suggestion so the list only advances the draft.
+ */
+export function suggestGuessPassages(
+  raw: string,
+  limit = 6
+): GuessSuggestion[] {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  return autocompletePassage(trimmed, { limit }).filter(
+    (suggestion) => suggestion.insertText !== trimmed
+  );
+}
+
+/**
+ * Progressive insert text: book → ready for chapter; chapter → ready for verse.
+ * Verse/range inserts as-is so a complete ref can be confirmed.
+ */
+export function progressiveInsertText(suggestion: GuessSuggestion): string {
+  if (suggestion.kind === "book") return `${suggestion.insertText} `;
+  if (suggestion.kind === "chapter") return `${suggestion.insertText}:`;
+  return suggestion.insertText;
 }

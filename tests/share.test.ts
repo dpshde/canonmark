@@ -1,72 +1,58 @@
 import { describe, it, expect } from "vitest";
 import {
   buildShareString,
-  distanceEmojiBand,
-  hintEmoji,
   buildDailyShareString,
+  formatShareDateForPuzzle,
+  formatPoints,
 } from "../src/lib/share";
-import { TOTAL_VERSES } from "../src/lib/books";
+import {
+  localDatePartsForPuzzleNumber,
+  puzzleNumberForLocalDate,
+  DAILY_EPOCH,
+} from "../src/lib/daily";
 
 describe("share string", () => {
-  it("daily: Wordle-class header + blank line + grid, no URL/CTA", () => {
-    const rounds = Array.from({ length: 4 }, (_, index) => ({
-      guessVerseIndex: 1000 + index,
-      trueVerseIndex: 1200 + index,
-      distance: 200,
-      total: 900,
-      hintStep: 1 as const,
-    }));
-    const s = buildDailyShareString(12, rounds);
-    const lines = s.split("\n");
-
-    // Line 1: brand + day + compact total (notification preview)
-    expect(lines[0]).toBe("Versemark 12 3600");
-    // Blank line separates header from grid
-    expect(lines[1]).toBe("");
-    // Four visual rows, no per-row score noise
-    expect(lines.slice(2)).toHaveLength(4);
-    for (const row of lines.slice(2)) {
-      expect(row).toMatch(hintEmoji(1));
-      expect(row).not.toContain("pts");
-    }
-    // Self-contained: no link, no CTA
-    expect(s).not.toContain("http");
-    expect(s).not.toContain("beat");
-    expect(s).not.toContain("Score to");
-    expect(s).not.toMatch(/can you|install|download/i);
-  });
-
-  it("daily: same payload shape is pure text (clipboard-native)", () => {
-    const s = buildDailyShareString(1, [
+  it("daily: calendar date + pts units, quiet score line", () => {
+    // Puzzle #12 = 2026-08-12
+    const rounds = [
       {
-        guessVerseIndex: 1,
-        trueVerseIndex: 1,
+        guessVerseIndex: 100,
+        trueVerseIndex: 100,
         distance: 0,
-        total: 2000,
-        hintStep: 1,
+        total: 980,
+        hintStep: 1 as const,
       },
-    ]);
-    expect(s.startsWith("Versemark 1 2000\n\n")).toBe(true);
-    expect(s).toContain("\uD83C\uDFAF"); // exact hit
-  });
-
-  it("single round: brand + score header, visual row, no URL", () => {
-    const s = buildShareString({
-      puzzleNumber: 12,
-      guessVerseIndex: 1000,
-      trueVerseIndex: 1400,
-      distance: 400,
-      total: 1500,
-      hintStep: 1,
-    });
+      {
+        guessVerseIndex: 100,
+        trueVerseIndex: 200,
+        distance: 100,
+        total: 720,
+        hintStep: 1 as const,
+      },
+      {
+        guessVerseIndex: 100,
+        trueVerseIndex: 700,
+        distance: 600,
+        total: 310,
+        hintStep: 2 as const,
+      },
+      {
+        guessVerseIndex: 100,
+        trueVerseIndex: 5000,
+        distance: 4900,
+        total: 90,
+        hintStep: 3 as const,
+      },
+    ];
+    const s = buildDailyShareString(12, rounds);
     expect(s).toBe(
-      `Versemark 12 1500\n\n${distanceEmojiBand(1000, 1400)} ${hintEmoji(1)}`
+      "Versemark 12 Aug 2026 · 2100 pts\n\n980 · 720 · 310 · 90"
     );
     expect(s).not.toContain("http");
-    expect(s).not.toContain("400 v");
+    expect(s).not.toMatch(/Versemark \d+ \d+$/m); // no bare puzzle# total
   });
 
-  it("practice rounds omit the day index", () => {
+  it("practice uses pts without a date", () => {
     const s = buildShareString({
       puzzleNumber: null,
       guessVerseIndex: 100,
@@ -75,15 +61,35 @@ describe("share string", () => {
       total: 900,
       hintStep: 2,
     });
-    expect(s.startsWith("Versemark 900\n\n")).toBe(true);
-    expect(s).not.toMatch(/Versemark \d+ \d+/); // no day index
-    expect(s).toContain(hintEmoji(2));
-    expect(s).not.toContain("http");
+    expect(s).toBe("Versemark · 900 pts\n\n900");
   });
 
-  it("distance band has expected length cells", () => {
-    const band = distanceEmojiBand(1, TOTAL_VERSES, 7);
-    expect(band.length).toBeGreaterThan(5);
-    expect(band).toMatch(/\u2B1C|\uD83D\uDD35|\uD83D\uDCCC|\uD83C\uDFAF/);
+  it("single daily-style round uses date + pts", () => {
+    const s = buildShareString({
+      puzzleNumber: 1,
+      guessVerseIndex: 1000,
+      trueVerseIndex: 1400,
+      distance: 400,
+      total: 1500,
+      hintStep: 1,
+    });
+    expect(s).toBe("Versemark 1 Aug 2026 · 1500 pts\n\n1500");
+  });
+
+  it("formatPoints always includes unit", () => {
+    expect(formatPoints(3600)).toBe("3600 pts");
+  });
+
+  it("puzzle number ↔ date round-trips through share label", () => {
+    const n = puzzleNumberForLocalDate(2026, 8, 15);
+    expect(n).toBe(15);
+    expect(formatShareDateForPuzzle(n)).toBe("15 Aug 2026");
+    const parts = localDatePartsForPuzzleNumber(n);
+    expect(parts).toEqual({ year: 2026, month: 8, day: 15 });
+    expect(localDatePartsForPuzzleNumber(1)).toEqual({
+      year: DAILY_EPOCH.year,
+      month: DAILY_EPOCH.month,
+      day: DAILY_EPOCH.day,
+    });
   });
 });

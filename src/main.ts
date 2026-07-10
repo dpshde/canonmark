@@ -18,7 +18,12 @@ import { CanonStrip } from "./lib/strip";
 import { formatVerseLabel } from "./lib/books";
 import { bookSegments, testamentSeamT, type ZoomPreset } from "./lib/axis";
 import { shareText } from "./lib/share";
-import { parseGuessText } from "./lib/guess-parse";
+import {
+  parseGuessText,
+  progressiveInsertText,
+  suggestGuessPassages,
+  type GuessSuggestion,
+} from "./lib/guess-parse";
 import { hapticLight, hapticResult } from "./lib/haptics";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
@@ -164,7 +169,11 @@ function renderHome(): void {
         });
         return b;
       })(),
-    ])
+    ]),
+    el("p", {
+      class: "attribution",
+      text: "Text · Berean Standard Bible",
+    })
   );
 
   screen.append(panel);
@@ -199,6 +208,10 @@ function startMode(mode: "daily" | "endless", puzzleNumber?: number): void {
 
 function renderPlay(): void {
   if (!round) return;
+  chromeRo?.disconnect();
+  chromeRo = null;
+  strip?.destroy();
+  strip = null;
   app.innerHTML = "";
   const screen = el("div", {
     class: "screen play active",
@@ -349,8 +362,10 @@ function renderPlay(): void {
       const locked = strip?.lockGuess() ?? provisionalGuess;
       const { round: next } = confirmGuess(round, locked);
       round = next;
+      provisionalGuess = locked;
+      activeZoom = null;
       hapticResult(locked === round.poolItem.verseIndex);
-      strip?.reveal(round.poolItem.verseIndex);
+      // Rebuild the play surface in result mode (new strip snaps full-canon).
       renderPlay();
     });
 
@@ -384,17 +399,16 @@ function renderPlay(): void {
     const zoomBar = document.querySelector<HTMLElement>(".zoom-bar");
     if (zoomBar) syncZoomBarUI(zoomBar);
   });
-  if (provisionalGuess != null) {
-    strip.setProvisionalGuess(provisionalGuess);
-  }
   if (round.phase === "revealed" && round.guessVerseIndex != null) {
+    // Result: OT/NT frame (or full map if cross-testament) — reveal sets span.
     strip.setProvisionalGuess(round.guessVerseIndex);
     strip.lockGuess();
     strip.reveal(round.poolItem.verseIndex);
+  } else if (provisionalGuess != null) {
+    strip.setProvisionalGuess(provisionalGuess);
   }
 
   /* Keep the rail centered in the free band as chrome resizes */
-  chromeRo?.disconnect();
   chromeRo = new ResizeObserver(() => syncChromeInsets());
   chromeRo.observe(hud);
   chromeRo.observe(board);
@@ -436,6 +450,7 @@ function syncChromeInsets(): void {
 }
 
 function makeGuessInput(): HTMLElement {
+  const listId = "guess-suggestions";
   const wrap = el("div", { class: "guess-field", id: "guess-readout" });
   const error = el("p", {
     class: "guess-error",
@@ -443,6 +458,14 @@ function makeGuessInput(): HTMLElement {
     "aria-live": "polite",
     text: "Try a reference like John 3:16.",
   });
+  const list = el("div", {
+    class: "guess-suggestions",
+    id: listId,
+    role: "listbox",
+    "aria-label": "Passage suggestions",
+  });
+  list.hidden = true;
+
   const input = el("input", {
     class: "guess-input",
     id: "guess-input",
@@ -453,6 +476,11 @@ function makeGuessInput(): HTMLElement {
     autocapitalize: "words",
     spellcheck: "false",
     enterkeyhint: "done",
+    role: "combobox",
+    "aria-autocomplete": "list",
+    "aria-expanded": "false",
+    "aria-controls": listId,
+    "aria-haspopup": "listbox",
     "aria-label": "Your guess — type a Bible reference or tap the timeline",
     "aria-errormessage": "guess-error",
     placeholder: "Type a reference or tap the timeline",
@@ -463,12 +491,82 @@ function makeGuessInput(): HTMLElement {
     wrap.classList.add("is-valid");
   }
 
+  let suggestions: GuessSuggestion[] = [];
+  let activeSuggestion = -1;
+
   const setValidity = (state: "empty" | "valid" | "invalid"): void => {
     wrap.classList.toggle("is-valid", state === "valid");
     wrap.classList.toggle("is-invalid", state === "invalid");
     guessInputInvalid = state === "invalid";
     input.setAttribute("aria-invalid", state === "invalid" ? "true" : "false");
     error.hidden = state !== "invalid";
+  };
+
+  const setActiveSuggestion = (index: number): void => {
+    activeSuggestion = index;
+    const options = list.querySelectorAll<HTMLElement>("[role='option']");
+    options.forEach((opt, i) => {
+      const selected = i === activeSuggestion;
+      opt.setAttribute("aria-selected", selected ? "true" : "false");
+      opt.classList.toggle("is-active", selected);
+      if (selected) {
+        input.setAttribute("aria-activedescendant", opt.id);
+        opt.scrollIntoView({ block: "nearest" });
+      }
+    });
+    if (activeSuggestion < 0) input.removeAttribute("aria-activedescendant");
+  };
+
+  const hideSuggestions = (): void => {
+    suggestions = [];
+    activeSuggestion = -1;
+    list.hidden = true;
+    list.replaceChildren();
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
+  };
+
+  const renderSuggestions = (): void => {
+    list.replaceChildren();
+    if (suggestions.length === 0) {
+      hideSuggestions();
+      return;
+    }
+    list.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+    for (let i = 0; i < suggestions.length; i += 1) {
+      const suggestion = suggestions[i]!;
+      const option = el("button", {
+        class: "guess-suggestion",
+        id: `${listId}-${i}`,
+        type: "button",
+        role: "option",
+        "aria-selected": "false",
+      });
+      option.append(
+        el("span", {
+          class: "guess-suggestion-label",
+          text: suggestion.label,
+        })
+      );
+      // mousedown (not click) so selection runs before input blur
+      option.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        applySuggestion(i);
+      });
+      option.addEventListener("mouseenter", () => setActiveSuggestion(i));
+      list.append(option);
+    }
+    setActiveSuggestion(0);
+  };
+
+  const refreshSuggestions = (): void => {
+    if (!guessInputFocused) {
+      hideSuggestions();
+      return;
+    }
+    suggestions = suggestGuessPassages(input.value);
+    renderSuggestions();
   };
 
   const applyFromInput = (commitLabel: boolean): void => {
@@ -492,17 +590,36 @@ function makeGuessInput(): HTMLElement {
       syncConfirmEnabled();
       return;
     }
-    setValidity("invalid");
+    // Partial drafts with autocomplete matches stay neutral — only hard-fail
+    // when the text can't complete into a known passage.
+    const canComplete = suggestGuessPassages(raw).length > 0;
+    setValidity(canComplete && guessInputFocused ? "empty" : "invalid");
     syncConfirmEnabled();
+  };
+
+  const applySuggestion = (index: number): void => {
+    const suggestion = suggestions[index];
+    if (!suggestion) return;
+    input.value = progressiveInsertText(suggestion);
+    applyFromInput(false);
+    refreshSuggestions();
+    // Keep caret at end for continued typing (chapter/verse after book)
+    const end = input.value.length;
+    input.setSelectionRange(end, end);
+    input.focus({ preventScroll: true });
   };
 
   input.addEventListener("focus", () => {
     guessInputFocused = true;
-    // Select all so a re-tap replaces cleanly
-    requestAnimationFrame(() => input.select());
+    // Select all so a re-tap replaces cleanly — then offer matches for current text
+    requestAnimationFrame(() => {
+      input.select();
+      refreshSuggestions();
+    });
   });
   input.addEventListener("blur", () => {
     guessInputFocused = false;
+    hideSuggestions();
     applyFromInput(true);
     // Normalize display to canonical label when valid
     if (provisionalGuess != null && parseGuessText(input.value).ok) {
@@ -510,12 +627,50 @@ function makeGuessInput(): HTMLElement {
       setValidity("valid");
     }
   });
-  input.addEventListener("input", () => applyFromInput(false));
+  input.addEventListener("input", () => {
+    applyFromInput(false);
+    refreshSuggestions();
+  });
   input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      if (!list.hidden) {
+        e.preventDefault();
+        hideSuggestions();
+      }
+      return;
+    }
+
+    if (!list.hidden && suggestions.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveSuggestion((activeSuggestion + 1) % suggestions.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActiveSuggestion(
+          (activeSuggestion - 1 + suggestions.length) % suggestions.length
+        );
+        return;
+      }
+      if (e.key === "Enter" && activeSuggestion >= 0) {
+        e.preventDefault();
+        applySuggestion(activeSuggestion);
+        return;
+      }
+      if (e.key === "Tab" && activeSuggestion >= 0 && !e.shiftKey) {
+        // Progressive complete without leaving the field
+        e.preventDefault();
+        applySuggestion(activeSuggestion);
+        return;
+      }
+    }
+
     if (e.key === "Enter") {
       e.preventDefault();
       applyFromInput(true);
       if (provisionalGuess != null && !guessInputInvalid) {
+        hideSuggestions();
         input.blur();
         document.querySelector<HTMLButtonElement>("#btn-confirm")?.focus();
       }
@@ -523,7 +678,7 @@ function makeGuessInput(): HTMLElement {
   });
 
   error.hidden = true;
-  wrap.append(input, error);
+  wrap.append(input, list, error);
   return wrap;
 }
 
@@ -566,9 +721,16 @@ function continueDailyRound(current: RoundData): void {
   renderPlay();
 }
 
+/** Plain-language hint spend for the result line (not "×3"). */
+function hintSpendLabel(multiplier: number): string {
+  if (multiplier >= 3) return "no hints";
+  if (multiplier === 2) return "1 hint";
+  return "2 hints";
+}
+
 /**
  * Result dock — score is the hero; timeline already carries guess/true labels.
- * One meta line, one action row. No repeated refs, no base-point jargon.
+ * One clear outcome line, one action row. No base-point jargon.
  */
 function makeResultPanel(round: RoundData): HTMLElement {
   const r = round.result!;
@@ -586,16 +748,23 @@ function makeResultPanel(round: RoundData): HTMLElement {
       : r.distance === 1
         ? "1 verse off"
         : `${r.distance} verses off`;
+  const exact = r.distance === 0;
+
+  const scoreLine = el("p", {
+    class: exact ? "score-line is-exact" : "score-line",
+    id: "score-total",
+  });
+  scoreLine.append(
+    document.createTextNode(String(displayTotal)),
+    el("span", { class: "pts-unit", text: "pts" })
+  );
 
   panel.append(
-    el("p", { class: "score-line", id: "score-total" }, [
-      document.createTextNode(String(displayTotal)),
-      el("span", { class: "pts-unit", text: "pts" }),
-    ]),
+    scoreLine,
     el("p", {
       class: "score-meta",
       id: "true-ref",
-      text: `${distLabel} · ×${r.multiplier}`,
+      text: `${distLabel} · ${hintSpendLabel(r.multiplier)}`,
     })
   );
 
