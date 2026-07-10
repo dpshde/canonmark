@@ -19,6 +19,7 @@ import { formatVerseLabel } from "./lib/books";
 import { hintMultiplier } from "./lib/scoring";
 import type { ZoomPreset } from "./lib/axis";
 import { shareText } from "./lib/share";
+import { parseGuessText } from "./lib/guess-parse";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -30,6 +31,8 @@ let provisionalGuess: number | null = null;
 let chromeRo: ResizeObserver | null = null;
 /** Active zoom chip; cleared when the player free-zooms with wheel/gesture. */
 let activeZoom: ZoomPreset | null = null;
+/** True while the guess field has focus — don't clobber in-progress typing. */
+let guessInputFocused = false;
 
 async function loadData(): Promise<void> {
   const base = import.meta.env.BASE_URL || "./";
@@ -216,12 +219,7 @@ function renderPlay(): void {
   if (hintPanel) dock.append(hintPanel);
 
   if (round.phase === "playing") {
-    const readout = el("div", {
-      class: "guess-readout",
-      id: "guess-readout",
-    });
-    updateReadout(readout);
-    dock.append(readout);
+    dock.append(makeGuessInput());
 
     const actions = el("div", { class: "actions" });
     const hintBtn = el("button", {
@@ -255,6 +253,16 @@ function renderPlay(): void {
     confirm.disabled = provisionalGuess == null;
     confirm.addEventListener("click", () => {
       if (!round || provisionalGuess == null) return;
+      // Prefer whatever is currently typed if it parses
+      const input = document.querySelector<HTMLInputElement>("#guess-input");
+      if (input?.value.trim()) {
+        const parsed = parseGuessText(input.value);
+        if (parsed.ok) {
+          provisionalGuess = parsed.verseIndex;
+          strip?.setProvisionalGuess(parsed.verseIndex);
+        }
+      }
+      if (provisionalGuess == null) return;
       const locked = strip?.lockGuess() ?? provisionalGuess;
       const { round: next } = confirmGuess(round, locked);
       round = next;
@@ -340,10 +348,8 @@ function renderPlay(): void {
   strip = new CanonStrip(canvas);
   strip.setOnGuessChange((ch) => {
     provisionalGuess = ch;
-    const conf = document.querySelector<HTMLButtonElement>("#btn-confirm");
-    if (conf) conf.disabled = ch == null;
-    const ro = document.querySelector("#guess-readout");
-    if (ro) updateReadout(ro as HTMLElement);
+    syncConfirmEnabled();
+    syncGuessInputFromMarker();
   });
   if (provisionalGuess != null) {
     strip.setProvisionalGuess(provisionalGuess);
@@ -379,23 +385,117 @@ function syncChromeInsets(): void {
       : br.top;
   const bottomEdge = dock ? dock.getBoundingClientRect().top : br.bottom;
 
-  const gap = 12; /* --space-md breathing room around rail labels */
+  /* Extra room so marker labels (~24px) clear the chrome gradients */
+  const topGap = 16;
+  const bottomGap = 16;
   strip.setChromeInsets({
-    top: Math.max(0, topEdge - br.top + gap),
-    bottom: Math.max(0, br.bottom - bottomEdge + gap),
+    top: Math.max(0, topEdge - br.top + topGap),
+    bottom: Math.max(0, br.bottom - bottomEdge + bottomGap),
     start: 0,
     end: 0,
   });
 }
 
-function updateReadout(node: HTMLElement): void {
+function makeGuessInput(): HTMLElement {
+  const wrap = el("div", { class: "guess-field", id: "guess-readout" });
+  const input = el("input", {
+    class: "guess-input",
+    id: "guess-input",
+    type: "text",
+    inputmode: "text",
+    autocomplete: "off",
+    autocorrect: "off",
+    autocapitalize: "words",
+    spellcheck: "false",
+    enterkeyhint: "done",
+    "aria-label": "Your guess — type a Bible reference or tap the timeline",
+    placeholder: "Type a reference or tap the timeline",
+  }) as HTMLInputElement;
+
+  if (provisionalGuess != null) {
+    input.value = formatVerseLabel(provisionalGuess);
+    wrap.classList.add("is-valid");
+  }
+
+  const setValidity = (state: "empty" | "valid" | "invalid"): void => {
+    wrap.classList.toggle("is-valid", state === "valid");
+    wrap.classList.toggle("is-invalid", state === "invalid");
+  };
+
+  const applyFromInput = (commitLabel: boolean): void => {
+    const raw = input.value;
+    const parsed = parseGuessText(raw);
+    if (parsed.ok) {
+      provisionalGuess = parsed.verseIndex;
+      strip?.setProvisionalGuess(parsed.verseIndex);
+      if (commitLabel && !guessInputFocused) {
+        input.value = parsed.label;
+      } else if (commitLabel && document.activeElement !== input) {
+        input.value = parsed.label;
+      }
+      setValidity("valid");
+      syncConfirmEnabled();
+      return;
+    }
+    if (parsed.reason === "empty") {
+      setValidity("empty");
+      // Keep timeline marker; empty field is fine while still deciding
+      syncConfirmEnabled();
+      return;
+    }
+    setValidity("invalid");
+    syncConfirmEnabled();
+  };
+
+  input.addEventListener("focus", () => {
+    guessInputFocused = true;
+    // Select all so a re-tap replaces cleanly
+    requestAnimationFrame(() => input.select());
+  });
+  input.addEventListener("blur", () => {
+    guessInputFocused = false;
+    applyFromInput(true);
+    // Normalize display to canonical label when valid
+    if (provisionalGuess != null && parseGuessText(input.value).ok) {
+      input.value = formatVerseLabel(provisionalGuess);
+      setValidity("valid");
+    }
+  });
+  input.addEventListener("input", () => applyFromInput(false));
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      applyFromInput(true);
+      if (provisionalGuess != null) {
+        input.blur();
+        document.querySelector<HTMLButtonElement>("#btn-confirm")?.focus();
+      }
+    }
+  });
+
+  wrap.append(input);
+  return wrap;
+}
+
+function syncConfirmEnabled(): void {
+  const conf = document.querySelector<HTMLButtonElement>("#btn-confirm");
+  if (conf) conf.disabled = provisionalGuess == null;
+}
+
+/** Push marker placement into the text field (unless the user is typing). */
+function syncGuessInputFromMarker(): void {
+  const input = document.querySelector<HTMLInputElement>("#guess-input");
+  const wrap = document.querySelector("#guess-readout");
+  if (!input || !wrap) return;
+  if (guessInputFocused) return;
   if (provisionalGuess == null) {
-    node.textContent = "Tap to mark · drag to scroll";
+    input.value = "";
+    wrap.classList.remove("is-valid", "is-invalid");
     return;
   }
-  const label = document.createElement("strong");
-  label.textContent = formatVerseLabel(provisionalGuess);
-  node.replaceChildren(label);
+  input.value = formatVerseLabel(provisionalGuess);
+  wrap.classList.add("is-valid");
+  wrap.classList.remove("is-invalid");
 }
 
 /** Surrounding paragraph + testament-half hints — rendered below the rail. */
@@ -523,10 +623,8 @@ function installDebugApi(): void {
     placeGuess(verseIndex: number) {
       provisionalGuess = verseIndex;
       strip?.setProvisionalGuess(verseIndex);
-      const conf = document.querySelector<HTMLButtonElement>("#btn-confirm");
-      if (conf) conf.disabled = false;
-      const ro = document.querySelector("#guess-readout");
-      if (ro) updateReadout(ro as HTMLElement);
+      syncConfirmEnabled();
+      syncGuessInputFromMarker();
     },
     confirm() {
       document.querySelector<HTMLButtonElement>("#btn-confirm")?.click();

@@ -181,6 +181,16 @@ export function panViewport(
   };
 }
 
+/**
+ * Default zoom for portrait/mobile: ~1/12 of the canon (~2.5k verses).
+ * Wide/desktop keeps the full overview so the map reads at a glance.
+ */
+export const DEFAULT_MOBILE_SPAN = Math.round(TOTAL_VERSES / 12);
+
+export function defaultSpanForOrientation(orientation: Orientation): number {
+  return orientation === "vertical" ? DEFAULT_MOBILE_SPAN : TOTAL_VERSES;
+}
+
 export function defaultViewport(
   orientation: Orientation,
   axisPx: number,
@@ -188,7 +198,7 @@ export function defaultViewport(
 ): Viewport {
   return {
     center: Math.round(TOTAL_VERSES / 2),
-    span: TOTAL_VERSES,
+    span: defaultSpanForOrientation(orientation),
     orientation,
     axisPx,
     crossPx,

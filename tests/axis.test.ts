@@ -78,6 +78,14 @@ describe("placement math", () => {
     expect(hit.verseIndex).toBeLessThan(TOTAL_VERSES * 0.6);
   });
 
+  it("portrait defaults much more zoomed in than landscape", () => {
+    const mobile = defaultViewport("vertical", 400, 800);
+    const desk = defaultViewport("horizontal", 1000, 200);
+    expect(mobile.span).toBeLessThan(TOTAL_VERSES / 8);
+    expect(desk.span).toBe(TOTAL_VERSES);
+    expect(mobile.span).toBeLessThan(desk.span);
+  });
+
   it("verseToAxisPx inverse of hitTest near center", () => {
     const vp = defaultViewport("vertical", 800, 300);
     const v = 15000;
