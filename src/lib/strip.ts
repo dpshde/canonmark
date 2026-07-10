@@ -218,6 +218,28 @@ export class CanonStrip {
     this.render();
   }
 
+  /**
+   * Place the marker from a typed reference and sync the map to verse precision
+   * around that verse. First entry from a broad view animates in; further typed
+   * changes snap the precision window so the rail follows typing.
+   */
+  focusGuessFromText(verseIndex: number): void {
+    const v = clampVerse(verseIndex);
+    this.state.provisionalGuess = v;
+    this.syncAccessibility();
+    this.onGuessChange?.(v);
+
+    const target = viewportForPrecision(this.state.viewport, v);
+    if (this.isPrecisionView()) {
+      this.stopViewportAnimation();
+      this.state.viewport = target;
+      this.render();
+      return;
+    }
+    this.prePrecisionViewport = { ...this.state.viewport };
+    this.animateToViewport(target);
+  }
+
   lockGuess(): number | null {
     if (this.state.provisionalGuess == null) return null;
     this.state.lockedGuess = this.state.provisionalGuess;
@@ -788,10 +810,28 @@ export class CanonStrip {
       const truth = this.state.trueVerse;
       if (guess != null && guess !== truth) {
         this.drawConnector(guess, truth, w, h);
-        // Prefer opposite label sides so they don't stack
-        const guessAbove = guess < truth;
-        this.drawGuessMarker(guess, w, h, true, guessAbove ? "above" : "below");
-        this.drawTrueMarker(truth, w, h, guessAbove ? "below" : "above");
+        // Landscape: opposite sides along the rail. Portrait: YOU left / TRUE
+        // right of the rail so close misses never stack into one chip.
+        const isH = this.state.viewport.orientation === "horizontal";
+        if (isH) {
+          const guessAbove = guess < truth;
+          this.drawGuessMarker(
+            guess,
+            w,
+            h,
+            true,
+            guessAbove ? "above" : "below"
+          );
+          this.drawTrueMarker(
+            truth,
+            w,
+            h,
+            guessAbove ? "below" : "above"
+          );
+        } else {
+          this.drawGuessMarker(guess, w, h, true, "above");
+          this.drawTrueMarker(truth, w, h, "below");
+        }
       } else {
         // Perfect hit (or missing guess) — single true marker
         this.drawTrueMarker(truth, w, h, "above");
@@ -1122,29 +1162,35 @@ export class CanonStrip {
     setLetterSpacing(ctx, "0.5px");
     ctx.textBaseline = "middle";
     for (const seg of bookSegments()) {
-      if (seg.endVerseIndex < range.start || seg.startVerseIndex > range.end) continue;
+      // Anchor at the book start — skip if that edge isn't on-screen
+      if (
+        seg.startVerseIndex < range.start ||
+        seg.startVerseIndex > range.end
+      ) {
+        continue;
+      }
       const lenPx = this.chPx(seg.startVerseIndex, seg.endVerseIndex + 1);
       // Keep short books quiet, but retain enough landmarks to navigate the
       // full-canon overview without relying only on the very longest books.
       if (lenPx < (isH ? 20 : 12)) continue;
       const alpha = Math.min(0.7, 0.3 + (lenPx - 14) / 200);
-      const mid = (seg.startVerseIndex + seg.endVerseIndex) / 2;
-      const p = this.railPoint(mid, w, h);
+      const p = this.railPoint(seg.startVerseIndex, w, h);
       ctx.fillStyle = `rgba(110, 101, 90, ${alpha})`;
       ctx.save();
       if (isH) {
-        // Landscape: above the rail, rotated −90° (reads bottom → top)
+        // Landscape: above the rail at book start, rotated −90°
         ctx.translate(p.x, p.y - thick / 2 - gap);
         ctx.rotate(-Math.PI / 2);
         ctx.textAlign = "left";
         ctx.fillText(seg.name.toUpperCase(), 0, 0);
       } else {
-        // Portrait/mobile: upright, to the left of the rail
+        // Portrait/mobile: upright at book start, left of the rail
         ctx.textAlign = "right";
+        ctx.textBaseline = "top";
         ctx.fillText(
           seg.name.toUpperCase(),
           p.x - thick / 2 - gap,
-          p.y
+          p.y + 1
         );
       }
       ctx.restore();
@@ -1334,8 +1380,9 @@ export class CanonStrip {
   }
 
   /**
-   * Result-page callout: role caption + verse ref, large enough to read at
-   * a glance against the rail (selected = terracotta, actual = olive).
+   * Result-page callout: role caption + verse ref.
+   * Portrait: YOU always left of the rail, TRUE always right (close misses
+   * stay legible). Landscape: above/below along the band.
    */
   private drawResultLabel(
     verseLabel: string,
@@ -1349,6 +1396,7 @@ export class CanonStrip {
     const { ctx } = this;
     const free = this.freeAxis();
     const isV = this.state.viewport.orientation === "vertical";
+    const isYou = role.toLowerCase() === "you";
     const ref = verseLabel.toUpperCase();
     const roleText = role.toUpperCase();
 
@@ -1368,24 +1416,36 @@ export class CanonStrip {
     const bw = Math.max(refW, roleW) + padX * 2;
     const bh = padY * 2 + roleH + gap + refH;
     const stem = 14;
+    const crossGap = this.railThick() / 2 + 12;
 
-    let bx = p.x - bw / 2;
-    let by = side === "above" ? p.y - bh - stem : p.y + stem;
+    let bx: number;
+    let by: number;
 
     if (isV) {
-      const minY = free.origin + 2;
-      const maxY = free.origin + free.length - bh - 2;
-      if (by < minY) by = p.y + stem;
-      if (by > maxY) by = p.y - bh - stem;
-      by = Math.min(maxY, Math.max(minY, by));
+      // Portrait: sit beside the rail so near-miss pins don't merge labels
+      by = p.y - bh / 2;
+      by = Math.min(
+        free.origin + free.length - bh - 2,
+        Math.max(free.origin + 2, by)
+      );
+      if (isYou) {
+        bx = p.x - crossGap - bw;
+        if (bx < 4) bx = p.x + crossGap;
+      } else {
+        bx = p.x + crossGap;
+        if (bx + bw > w - 4) bx = p.x - crossGap - bw;
+      }
+      bx = Math.min(Math.max(4, bx), w - bw - 4);
     } else {
+      bx = p.x - bw / 2;
+      by = side === "above" ? p.y - bh - stem : p.y + stem;
       if (by < 4) by = p.y + stem;
       if (by + bh > h - 4) by = p.y - bh - stem;
       const minX = free.origin + 2;
       const maxX = free.origin + free.length - bw - 2;
       bx = Math.min(maxX, Math.max(minX, bx));
+      bx = Math.min(Math.max(4, bx), w - bw - 4);
     }
-    bx = Math.min(Math.max(4, bx), w - bw - 4);
 
     // Transparent chip + strong border (page bg shows through)
     ctx.fillStyle = BG;
@@ -1396,17 +1456,26 @@ export class CanonStrip {
     roundedRect(ctx, bx, by, bw, bh, 5);
     ctx.stroke();
 
-    // Short stem toward the pin
-    const stemX = Math.min(Math.max(p.x, bx + 8), bx + bw - 8);
+    // Stem toward the pin
     ctx.strokeStyle = ink;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    if (side === "above" || by + bh < p.y) {
-      ctx.moveTo(stemX, by + bh);
-      ctx.lineTo(p.x, p.y - 10);
+    if (isV) {
+      const chipOnLeft = bx + bw / 2 <= p.x;
+      const chipEdgeX = chipOnLeft ? bx + bw : bx;
+      const pinEdgeX = chipOnLeft ? p.x - 10 : p.x + 10;
+      const midY = Math.min(Math.max(p.y, by + 6), by + bh - 6);
+      ctx.moveTo(chipEdgeX, midY);
+      ctx.lineTo(pinEdgeX, p.y);
     } else {
-      ctx.moveTo(stemX, by);
-      ctx.lineTo(p.x, p.y + 10);
+      const stemX = Math.min(Math.max(p.x, bx + 8), bx + bw - 8);
+      if (side === "above" || by + bh < p.y) {
+        ctx.moveTo(stemX, by + bh);
+        ctx.lineTo(p.x, p.y - 10);
+      } else {
+        ctx.moveTo(stemX, by);
+        ctx.lineTo(p.x, p.y + 10);
+      }
     }
     ctx.stroke();
 

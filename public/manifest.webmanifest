@@ -1,19 +1,19 @@
 {
+  "id": "./",
   "name": "Versemark",
   "short_name": "Versemark",
   "description": "Mark where the verse lives in Scripture.",
+  "lang": "en",
+  "dir": "ltr",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
   "background_color": "#faf8f4",
   "theme_color": "#faf8f4",
   "orientation": "any",
+  "categories": ["games", "education"],
   "icons": [
-    {
-      "src": "./favicon.svg",
-      "type": "image/svg+xml",
-      "sizes": "any",
-      "purpose": "any"
-    },
     {
       "src": "./icon-192.png",
       "type": "image/png",
@@ -31,6 +31,12 @@
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "maskable"
+    },
+    {
+      "src": "./favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
     }
   ]
 }

@@ -17,10 +17,12 @@
     "jsdom": "^25.0.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.3",
+    "vite-plugin-pwa": "^1.3.0",
     "vitest": "^2.1.8"
   },
   "dependencies": {
     "grab-bcv": "^0.1.7",
+    "snd-lib": "^1.2.4",
     "web-haptics": "^0.0.6"
   }
 }

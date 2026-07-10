@@ -1,4 +1,5 @@
 import { WebHaptics } from "web-haptics";
+import { soundResult } from "./sounds";
 
 const haptics = new WebHaptics();
 const MOBILE_POINTER = "(hover: none) and (pointer: coarse)";
@@ -36,4 +37,5 @@ export function hapticLight(): void {
 export function hapticResult(correct: boolean): void {
   // An incorrect guess is a normal game outcome, not an error condition.
   trigger(correct ? "success" : "medium");
+  soundResult(correct);
 }

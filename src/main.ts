@@ -25,6 +25,7 @@ import {
   type GuessSuggestion,
 } from "./lib/guess-parse";
 import { hapticLight, hapticResult } from "./lib/haptics";
+import { initSounds } from "./lib/sounds";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -574,7 +575,11 @@ function makeGuessInput(): HTMLElement {
     const parsed = parseGuessText(raw);
     if (parsed.ok) {
       provisionalGuess = parsed.verseIndex;
-      strip?.setProvisionalGuess(parsed.verseIndex);
+      // Move the marker and zoom/pan verse precision to match the typed ref
+      strip?.focusGuessFromText(parsed.verseIndex);
+      activeZoom = null;
+      const zoomBar = document.querySelector<HTMLElement>(".zoom-bar");
+      if (zoomBar) syncZoomBarUI(zoomBar);
       if (commitLabel && !guessInputFocused) {
         input.value = parsed.label;
       } else if (commitLabel && document.activeElement !== input) {
@@ -582,6 +587,7 @@ function makeGuessInput(): HTMLElement {
       }
       setValidity("valid");
       syncConfirmEnabled();
+      syncTimelineCue();
       return;
     }
     if (parsed.reason === "empty") {
@@ -1061,6 +1067,7 @@ async function main(): Promise<void> {
     console.error(e);
     return;
   }
+  void initSounds();
   installDebugApi();
   const params = new URLSearchParams(window.location.search);
   const sharedDaily = Number(params.get("daily"));
