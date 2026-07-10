@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Versemark">
+  <!-- Marker diamond — matches the in-app pin (accent #b85a20) -->
+  <path
+    fill="#b85a20"
+    d="M16 3.5 28.5 16 16 28.5 3.5 16 Z"
+  />
+</svg>
