@@ -1,0 +1,591 @@
+/*
+ * Canonmark — timeline is the board; chrome is a full-viewport overlay.
+ * One content measure for verse + dock; spacing from the token scale.
+ */
+
+:root {
+  color-scheme: light;
+
+  --bg: oklch(0.985 0.003 50);
+  --surface: oklch(0.972 0.004 50);
+  --surface-2: oklch(0.945 0.006 50);
+  --rail: oklch(0.93 0.005 50);
+
+  --ink: oklch(0.27 0.008 50);
+  --ink-2: oklch(0.45 0.010 50);
+  --ink-3: oklch(0.60 0.008 50);
+
+  --accent: oklch(0.55 0.15 40);
+  --accent-deep: oklch(0.45 0.14 40);
+  --accent-soft: oklch(0.90 0.035 45);
+
+  --success: oklch(0.52 0.11 145);
+  --border: oklch(0.90 0.006 50);
+
+  --radius-btn: 6px;
+
+  /* 4pt scale */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-2xl: 32px;
+  --space-3xl: 48px;
+
+  /* Shared horizontal measure for verse + dock */
+  --content-max: 36rem;
+  --hud-inline: var(--space-lg);
+
+  --z-board: 0;
+  --z-hud: 2;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 0.15s;
+  --dur-mid: 0.25s;
+
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia,
+    "Times New Roman", serif;
+  line-height: 1.5;
+  font-variant-numeric: oldstyle-nums;
+  color: var(--ink);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+#app {
+  min-height: 100dvh;
+  position: relative;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ———— Screens ———— */
+
+.screen {
+  display: none;
+  min-height: 100dvh;
+  position: relative;
+}
+.screen.active {
+  display: block;
+}
+
+/* ———— Home ———— */
+
+.home.active {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  animation: fadeRise var(--dur-mid) var(--ease-out) both;
+}
+
+.home-panel {
+  position: relative;
+  z-index: var(--z-hud);
+  padding: var(--space-3xl) var(--space-xl) calc(var(--space-2xl) + env(safe-area-inset-bottom));
+  max-width: 360px;
+  width: 100%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.home-mark {
+  width: 36px;
+  height: 36px;
+  margin-bottom: var(--space-md);
+}
+.home-mark svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.home-mark .rail-line {
+  stroke: var(--ink-3);
+  stroke-width: 2;
+}
+.home-mark .marker-dot {
+  fill: var(--accent);
+}
+.home-mark .marker-true {
+  fill: var(--success);
+}
+
+.home h1 {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  color: var(--ink);
+  text-wrap: balance;
+}
+
+.home .tagline {
+  margin: var(--space-sm) 0 0;
+  color: var(--ink-2);
+  font-size: 1.04rem;
+  line-height: 1.5;
+  max-width: 280px;
+}
+
+.home .streak {
+  margin: var(--space-lg) 0 0;
+  font-size: 0.82rem;
+  color: var(--ink-3);
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
+}
+
+.btn-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-2xl);
+  width: 100%;
+  max-width: 280px;
+}
+
+/* ———— Buttons ———— */
+
+button,
+.btn {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-btn);
+  padding: var(--space-md) var(--space-lg);
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 44px;
+  transition:
+    background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+
+button:active:not(:disabled) {
+  opacity: 0.9;
+}
+
+button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-deep);
+  border-color: var(--accent-deep);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--ink-2);
+  border-color: var(--border);
+  font-weight: 500;
+}
+.btn-secondary:hover:not(:disabled) {
+  color: var(--accent-deep);
+  border-color: var(--accent);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--ink-3);
+  border-color: transparent;
+  font-size: 0.92rem;
+  min-height: 44px;
+  padding: var(--space-sm) var(--space-md);
+  font-weight: 500;
+}
+.btn-ghost:hover {
+  color: var(--ink);
+}
+
+/* ———— Play: full-viewport overlay over the board ———— */
+
+.play.active {
+  display: block;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+.board-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-board);
+  touch-action: none;
+  background: var(--bg);
+}
+
+.board-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+/*
+ * Overlay grid — full width, not a left phone column.
+ * Rows: top chrome · verse · free mid (hits pass through) · dock
+ */
+.hud {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-hud);
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  grid-template-columns: 1fr;
+  pointer-events: none;
+  padding:
+    calc(var(--space-sm) + env(safe-area-inset-top))
+    var(--hud-inline)
+    calc(var(--space-md) + env(safe-area-inset-bottom));
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.hud > * {
+  pointer-events: auto;
+}
+
+/* Mid row is transparent hit-through to the canvas */
+.hud-mid {
+  pointer-events: none !important;
+  min-height: 0;
+}
+
+/* Top bar — Home | OT · NT · Book | mode */
+.top-bar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  min-height: 44px;
+}
+
+.top-bar > .btn-ghost {
+  justify-self: start;
+}
+
+.top-bar > .mode-label {
+  justify-self: end;
+  color: var(--ink-3);
+  font-size: 0.82rem;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+
+/* Map zoom — plain text links, same voice as mode label */
+.zoom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  justify-self: center;
+}
+
+.zoom-sep {
+  color: var(--ink-3);
+  opacity: 0.45;
+  font-size: 0.82rem;
+  padding: 0 1px;
+  user-select: none;
+  pointer-events: none;
+}
+
+.zoom-link {
+  appearance: none;
+  border: none;
+  background: transparent;
+  margin: 0;
+  padding: var(--space-sm) var(--space-sm);
+  min-height: 44px;
+  min-width: 44px;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: color var(--dur-fast) ease;
+}
+
+.zoom-link:hover {
+  color: var(--ink);
+}
+
+.zoom-link.is-active {
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+
+.zoom-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-btn);
+}
+
+/* Verse + dock share one centered measure */
+.verse-band,
+.dock {
+  width: min(100%, var(--content-max));
+  margin-inline: auto;
+  justify-self: center;
+}
+
+/* Type is non-interactive; let taps reach the board under the verse band */
+.verse-band {
+  pointer-events: none !important;
+}
+
+/* Verse — in-flow, type only */
+.card {
+  position: relative;
+  padding: var(--space-sm) 0 var(--space-lg);
+  text-align: center;
+  pointer-events: none;
+  /* Soft fade under type so rail labels don't fight long verses */
+  background: linear-gradient(
+    to bottom,
+    var(--bg) 0%,
+    var(--bg) 55%,
+    oklch(0.985 0.003 50 / 0) 100%
+  );
+  margin: 0 calc(var(--space-sm) * -1);
+  padding-inline: var(--space-sm);
+}
+
+.card .verse {
+  margin: 0;
+  font-size: 1.04rem;
+  line-height: 1.6;
+  color: var(--ink);
+  text-wrap: pretty;
+  max-width: 65ch;
+  margin-inline: auto;
+}
+
+/* Dock — hints under the rail, then status + actions */
+.dock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-top: var(--space-xl);
+  background: linear-gradient(
+    to top,
+    var(--bg) 0%,
+    var(--bg) 65%,
+    oklch(0.985 0.003 50 / 0) 100%
+  );
+  margin-bottom: 0;
+}
+
+/* Hints — below timeline, above guess / Confirm */
+.hint-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  text-align: center;
+  max-width: 65ch;
+  margin-inline: auto;
+  width: 100%;
+  padding-bottom: var(--space-xs);
+}
+
+.hint-panel .paragraph {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+
+.hint-panel .paragraph .focus {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.hint-panel .quadrant {
+  margin: 0;
+  font-size: 0.86rem;
+  font-style: italic;
+  color: var(--ink-3);
+}
+
+.guess-readout {
+  font-size: 0.96rem;
+  color: var(--ink-3);
+  text-align: center;
+  min-height: 1.35em;
+  pointer-events: none;
+}
+
+.guess-readout strong {
+  color: var(--accent-deep);
+  font-weight: 600;
+  font-size: 1.04rem;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: stretch;
+}
+
+.actions .btn-secondary {
+  flex: 0 0 auto;
+  min-width: 5.5rem;
+}
+
+.actions .btn-primary {
+  flex: 1 1 auto;
+}
+
+.btn-full {
+  width: 100%;
+}
+
+/* Result — flat, in the dock band */
+.result-panel {
+  text-align: center;
+  animation: fadeRise var(--dur-mid) var(--ease-out) both;
+  padding: var(--space-xs) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.result-panel .score-line {
+  margin: 0;
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+
+.result-panel .score-line .pts-unit {
+  font-size: 0.5em;
+  font-weight: 400;
+  color: var(--ink-3);
+  letter-spacing: 0.03em;
+  margin-left: 0.15em;
+}
+
+.result-panel .score-meta {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--ink-3);
+}
+
+.result-panel .true-loc {
+  margin: var(--space-xs) 0 0;
+  font-size: 0.96rem;
+  color: var(--ink);
+}
+
+.result-panel .true-ref {
+  font-weight: 600;
+}
+
+.result-panel .btn-full {
+  margin-top: var(--space-sm);
+}
+
+.share-box {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+  text-align: left;
+  font-variant-numeric: oldstyle-nums;
+}
+
+/* ———— Wide: more inline padding, same composition ———— */
+
+@media (min-width: 720px) {
+  :root {
+    --hud-inline: var(--space-2xl);
+  }
+
+  .home-panel {
+    max-width: 380px;
+    padding: var(--space-3xl) var(--space-2xl)
+      calc(var(--space-3xl) + env(safe-area-inset-bottom));
+  }
+
+  .btn-row {
+    max-width: 300px;
+  }
+
+  .card .verse {
+    font-size: 1.1rem;
+  }
+}
+
+/* ———— Motion ———— */
+
+@keyframes fadeRise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01s !important;
+  }
+}
