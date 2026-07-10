@@ -7,6 +7,8 @@ import {
   startEndlessRound,
   advanceDailyRound,
   takeHint,
+  canTakeHint,
+  isUsefulParagraph,
   confirmGuess,
   shareForRound,
   hintQuadrantLabel,
@@ -26,11 +28,42 @@ import {
 } from "./lib/guess-parse";
 import { hapticLight, hapticResult } from "./lib/haptics";
 import { initSounds } from "./lib/sounds";
+import {
+  initInstallCapture,
+  promptInstall,
+  shouldOfferInstall,
+  snoozeInstallOffer,
+} from "./lib/install";
+import {
+  loadTranslation,
+  saveTranslation,
+  loadState,
+  markAchievementsSeen,
+  unseenAchievementCount,
+  type TranslationId,
+} from "./lib/storage";
+import {
+  computeMastery,
+  formatMiss,
+  type MasteryReport,
+} from "./lib/mastery";
+import {
+  listAchievements,
+  unlockedCount,
+  achievementDefForId,
+  dropCapPath,
+  type AchievementMetal,
+} from "./lib/achievements";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
 let pool: PoolItem[] = [];
-let texts: TextBundle = { verses: {}, paragraphs: {} };
+/** BSB + KJV text bundles for the curated pool. */
+let textsByTranslation: Record<TranslationId, TextBundle> = {
+  kjv: { verses: {}, paragraphs: {} },
+  bsb: { verses: {}, paragraphs: {} },
+};
+let translation: TranslationId = "bsb";
 let round: RoundData | null = null;
 let strip: CanonStrip | null = null;
 let provisionalGuess: number | null = null;
@@ -43,22 +76,86 @@ let guessInputFocused = false;
 let guessInputInvalid = false;
 let scoreToBeat: number | null = null;
 
+function activeTexts(): TextBundle {
+  return textsByTranslation[translation];
+}
+
+/** Join public asset path with Vite base (handles `./` and `/foo/`). */
+function assetUrl(base: string, path: string): string {
+  if (/^https?:\/\//.test(path)) return path;
+  if (base.endsWith("/") && path.startsWith("/")) return base + path.slice(1);
+  if (!base.endsWith("/") && !path.startsWith("/") && base !== "./") {
+    return `${base}/${path}`;
+  }
+  // base is `./` or ends with /
+  return `${base}${path}`;
+}
+
+/**
+ * Load a drop-cap; if the preferred metal file 404s, try the other metals
+ * for the same motif so open-ended rungs never show an empty orange tile.
+ */
+function bindDropCapSrc(
+  img: HTMLImageElement,
+  base: string,
+  dropCap: string,
+  preferred: AchievementMetal
+): void {
+  const m = dropCap.match(
+    /^(?:\.\/)?assets\/achievements\/(.+)-(bronze|gold|snow)\.jpg$/
+  );
+  const motif = m?.[1];
+  const order: AchievementMetal[] = [
+    preferred,
+    ...(["bronze", "gold", "snow"] as const).filter((x) => x !== preferred),
+  ];
+  let i = 0;
+  const apply = () => {
+    const metal = order[i] ?? preferred;
+    img.src = assetUrl(
+      base,
+      motif ? dropCapPath(motif, metal) : dropCap
+    );
+  };
+  img.onerror = () => {
+    i += 1;
+    if (motif && i < order.length) apply();
+  };
+  apply();
+}
+
 async function loadData(): Promise<void> {
   const base = import.meta.env.BASE_URL || "./";
-  const [poolRes, versesRes, paraRes] = await Promise.all([
-    fetch(`${base}data/pool.json`),
-    fetch(`${base}data/verses.json`),
-    fetch(`${base}data/paragraphs.json`),
-  ]);
-  if (!poolRes.ok || !versesRes.ok || !paraRes.ok) {
+  const [poolRes, bsbVersesRes, bsbParaRes, kjvVersesRes, kjvParaRes] =
+    await Promise.all([
+      fetch(`${base}data/pool.json`),
+      fetch(`${base}data/verses.json`),
+      fetch(`${base}data/paragraphs.json`),
+      fetch(`${base}data/verses-kjv.json`),
+      fetch(`${base}data/paragraphs-kjv.json`),
+    ]);
+  if (
+    !poolRes.ok ||
+    !bsbVersesRes.ok ||
+    !bsbParaRes.ok ||
+    !kjvVersesRes.ok ||
+    !kjvParaRes.ok
+  ) {
     throw new Error("Failed to load game data");
   }
   const poolFile = (await poolRes.json()) as PoolFile;
   pool = poolFile.items;
-  texts = {
-    verses: (await versesRes.json()) as Record<string, string>,
-    paragraphs: (await paraRes.json()) as TextBundle["paragraphs"],
+  textsByTranslation = {
+    bsb: {
+      verses: (await bsbVersesRes.json()) as Record<string, string>,
+      paragraphs: (await bsbParaRes.json()) as TextBundle["paragraphs"],
+    },
+    kjv: {
+      verses: (await kjvVersesRes.json()) as Record<string, string>,
+      paragraphs: (await kjvParaRes.json()) as TextBundle["paragraphs"],
+    },
   };
+  translation = loadTranslation();
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -108,6 +205,272 @@ function makeHomeTimeline(): HTMLElement {
   return timeline;
 }
 
+/** Quiet unlock notice (no celebration motion). */
+function showUnlockToast(ids: string[]): void {
+  if (!ids.length) return;
+  const first = achievementDefForId(ids[0] ?? "");
+  const more = ids.length > 1 ? ` · +${ids.length - 1} more` : "";
+  const title = first?.title ?? "Achievement";
+  const existing = document.querySelector(".unlock-toast");
+  existing?.remove();
+  const toast = el("div", {
+    class: "unlock-toast",
+    role: "status",
+    "aria-live": "polite",
+  });
+  toast.append(
+    el("p", {
+      class: "unlock-toast-title",
+      text: `Unlocked · ${title}${more}`,
+    })
+  );
+  document.body.append(toast);
+  window.setTimeout(() => toast.remove(), 3200);
+}
+
+function renderAchievements(): void {
+  markAchievementsSeen();
+  const state = loadState();
+  const mastery = computeMastery(state);
+  const unlocks = listAchievements(state);
+  const counts = unlockedCount(state);
+
+  app.innerHTML = "";
+  const screen = el("div", {
+    class: "screen achievements active",
+    id: "screen-achievements",
+  });
+
+  const top = el("div", { class: "achievements-top" });
+  const back = el("button", {
+    class: "btn-ghost",
+    type: "button",
+    id: "btn-achievements-home",
+    "aria-label": "Home",
+    title: "Home",
+  });
+  back.innerHTML = `<svg class="home-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M3.75 10.5 12 3.75l8.25 6.75" />
+    <path d="M5.75 9.25v10h12.5v-10M9.5 19.25v-5.5h5v5.5" />
+  </svg>`;
+  back.addEventListener("click", () => {
+    hapticLight();
+    renderHome();
+  });
+  top.append(
+    back,
+    el("h1", { class: "achievements-heading", text: "Achievements" })
+  );
+  screen.append(top);
+
+  const body = el("div", { class: "achievements-body" });
+
+  // —— Summary (type-only, no label, no ruling) ——
+  const summary = el("div", {
+    class: "achievements-summary",
+    "aria-label": "Lifetime summary",
+  });
+  if (mastery.totalRounds === 0) {
+    summary.append(
+      el("p", {
+        class: "achievements-empty",
+        text: "Finish a daily or practice round to start your ledger.",
+      })
+    );
+  } else {
+    summary.append(
+      el("p", {
+        text: `${mastery.totalRounds} rounds · ${mastery.dailyRoundCount} daily · ${mastery.practiceRoundCount} practice`,
+      })
+    );
+    const parts = [
+      `${mastery.exactCount} exact`,
+      `${mastery.nearCount} near`,
+    ];
+    if (mastery.bestStreak > 0) {
+      parts.push(`streak ${mastery.streak} · best ${mastery.bestStreak}`);
+    }
+    summary.append(el("p", { text: parts.join(" · ") }));
+  }
+  body.append(summary);
+
+  if (mastery.totalRounds > 0) {
+    // —— Genres ——
+    body.append(
+      el("h2", { class: "achievements-section-label", text: "Genres" })
+    );
+    if (!mastery.genres.length) {
+      body.append(
+        el("p", {
+          class: "achievements-sparse",
+          text: "Play a few more rounds across the canon to measure genres.",
+        })
+      );
+    } else {
+      body.append(masteryList(mastery.genres, "genre"));
+    }
+
+    // —— Books ——
+    body.append(
+      el("h2", { class: "achievements-section-label", text: "Books" })
+    );
+    if (!mastery.books.length) {
+      body.append(
+        el("p", {
+          class: "achievements-sparse",
+          text: "Books you've been tested on will appear here (two or more rounds).",
+        })
+      );
+    } else {
+      body.append(masteryList(mastery.books, "book"));
+    }
+
+    // Weak slices are named only when the lists are long enough that the
+    // bottom rows aren't already telling the same story.
+    const weakNames = [
+      ...(mastery.genres.length >= 3
+        ? mastery.weakGenres.slice(0, 2).map((g) => g.label)
+        : []),
+      ...(mastery.books.length >= 4
+        ? mastery.weakBooks.slice(0, 2).map((b) => b.label)
+        : []),
+    ];
+    if (weakNames.length) {
+      body.append(
+        el("p", {
+          class: "weak-lead",
+          text: `Needs map time · ${weakNames.join(", ")}`,
+        })
+      );
+    }
+
+    if (
+      mastery.worstRounds.length &&
+      mastery.worstRounds[0].effectiveDistance > 0
+    ) {
+      const details = el("details", { class: "worst-rounds" });
+      details.append(el("summary", { text: "Worst rounds" }));
+      const ol = el("ol", { class: "worst-rounds-list" });
+      for (const w of mastery.worstRounds) {
+        const guess = formatVerseLabel(w.guessVerseIndex);
+        const dist =
+          w.effectiveDistance === 0
+            ? "exact"
+            : `${w.effectiveDistance} verse${w.effectiveDistance === 1 ? "" : "s"} off`;
+        ol.append(
+          el("li", { text: `${w.trueRef} · placed ${guess} · ${dist}` })
+        );
+      }
+      details.append(ol);
+      body.append(details);
+    }
+  }
+
+  // —— Unlocks (open-ended ladders; total is visible goals, not a ceiling) ——
+  body.append(
+    el("h2", {
+      class: "achievements-section-label",
+      text: counts.openEnded
+        ? `Unlocks · ${counts.unlocked}`
+        : `Unlocks · ${counts.unlocked} / ${counts.total}`,
+    })
+  );
+  const log = el("ul", {
+    class: "achievements-log",
+    "aria-label": "Achievement log",
+  });
+  const base = import.meta.env.BASE_URL || "./";
+  for (const a of unlocks) {
+    const li = el("li", {
+      class: a.unlocked
+        ? `achievement-row is-unlocked metal-${a.metal}`
+        : `achievement-row is-locked metal-${a.metal}`,
+    });
+    const frame = el("div", {
+      class: `achievement-dropcap-frame metal-${a.metal}`,
+      "aria-hidden": "true",
+    });
+    const cap = document.createElement("img");
+    cap.className = "achievement-dropcap";
+    cap.alt = "";
+    cap.width = 56;
+    cap.height = 56;
+    // Row height is driven by --dropcap-size in CSS
+    cap.decoding = "async";
+    cap.loading = "lazy";
+    bindDropCapSrc(cap, base, a.dropCap, a.metal);
+    frame.append(cap);
+    let meta = "Locked";
+    if (a.unlocked) {
+      const d = a.unlockedAt ? new Date(a.unlockedAt) : null;
+      meta =
+        d && Number.isFinite(d.getTime())
+          ? d.toLocaleDateString(undefined, {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+            })
+          : "Unlocked";
+    } else if (
+      a.threshold != null &&
+      a.current != null &&
+      a.threshold > 0
+    ) {
+      meta = `${a.current.toLocaleString()} / ${a.threshold.toLocaleString()}`;
+    }
+    const text = el("div", { class: "achievement-copy" });
+    text.append(
+      el("p", { class: "achievement-head" }, [
+        el("span", { class: "achievement-title", text: a.title }),
+        el("span", { class: "achievement-meta", text: meta }),
+      ]),
+      el("p", { class: "achievement-desc", text: a.description })
+    );
+    li.append(frame, text);
+    log.append(li);
+  }
+  body.append(log);
+
+  screen.append(body);
+  app.append(screen);
+}
+
+function masteryList(
+  slices: MasteryReport["genres"],
+  kind: string
+): HTMLElement {
+  const ul = el("ul", {
+    class: "mastery-list",
+    "aria-label": `${kind} mastery`,
+  });
+  for (const s of slices) {
+    const name = el("span", { class: "mastery-name", text: s.label }, [
+      el("span", {
+        class: "mastery-count",
+        text: ` · ${s.rounds} rounds`,
+      }),
+    ]);
+    const row = el("li", { class: "mastery-row" }, [
+      el("div", { class: "mastery-row-main" }, [
+        name,
+        el("span", {
+          class: "mastery-miss",
+          text: formatMiss(s.medianDistance),
+        }),
+      ]),
+    ]);
+    const hits = [
+      s.exactCount > 0 ? `${s.exactCount} exact` : null,
+      s.nearCount > 0 ? `${s.nearCount} near` : null,
+    ].filter((p): p is string => p != null);
+    if (hits.length) {
+      row.append(el("p", { class: "mastery-sub", text: hits.join(" · ") }));
+    }
+    ul.append(row);
+  }
+  return ul;
+}
+
 function makeWordmark(): HTMLHeadingElement {
   const heading = el("h1", { "aria-label": "Versemark" });
   heading.append(
@@ -122,6 +485,35 @@ function renderHome(): void {
   app.innerHTML = "";
   const state = currentAppState();
   const screen = el("div", { class: "screen home active", id: "screen-home" });
+
+  const unseen = unseenAchievementCount(state);
+  const crown = el("button", {
+    class: "home-achievements-btn btn-ghost",
+    type: "button",
+    id: "btn-achievements",
+    "aria-label":
+      unseen > 0
+        ? `Achievements, ${unseen} new`
+        : "Achievements",
+    title: "Achievements",
+  });
+  crown.innerHTML = `<svg class="crown-icon" viewBox="0 0 256 256" fill="none" aria-hidden="true">
+  <path d="M54.71,200H201.29a8,8,0,0,0,7.88-6.61l22.7-104A8,8,0,0,0,218,82.76L176,128,135.26,36.65a8,8,0,0,0-14.52,0L80,128,38,82.76a8,8,0,0,0-13.9,6.66l22.7,104A8,8,0,0,0,54.71,200Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/>
+</svg>`;
+  if (unseen > 0) {
+    crown.append(
+      el("span", {
+        class: "achievements-dot",
+        "aria-hidden": "true",
+      })
+    );
+  }
+  crown.addEventListener("click", () => {
+    hapticLight();
+    renderAchievements();
+  });
+  screen.append(crown);
+
   const panel = el("div", { class: "home-panel" });
 
   panel.append(
@@ -146,11 +538,18 @@ function renderHome(): void {
     el("div", { class: "btn-row" }, [
       (() => {
         const b = el("button", {
-          class: "btn-primary",
+          class: "btn-primary btn-with-icon",
           id: "btn-daily",
           type: "button",
-          text: "Daily",
         });
+        b.innerHTML = `<svg class="btn-icon" viewBox="0 0 256 256" fill="none" aria-hidden="true">
+  <rect x="40" y="40" width="176" height="176" rx="8" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/>
+  <line x1="176" y1="24" x2="176" y2="56" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/>
+  <line x1="80" y1="24" x2="80" y2="56" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/>
+  <line x1="40" y1="88" x2="216" y2="88" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/>
+  <polyline points="88 128 104 120 104 184" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/>
+  <path d="M138.14,128a16,16,0,1,1,26.64,17.63L136,184h32" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/>
+</svg><span>Daily</span>`;
         b.addEventListener("click", () => {
           hapticLight();
           startMode("daily");
@@ -170,14 +569,22 @@ function renderHome(): void {
         });
         return b;
       })(),
-    ]),
+    ])
+  );
+
+  // Translation credit: wide-screen footer only (hidden on mobile via CSS).
+  const footer = el("footer", {
+    class: "home-footer",
+    "aria-label": "Text credit",
+  });
+  footer.append(
     el("p", {
       class: "attribution",
-      text: "Text · Berean Standard Bible",
+      text: "Text · KJV · BSB",
     })
   );
 
-  screen.append(panel);
+  screen.append(panel, footer);
   app.append(screen);
 }
 
@@ -189,6 +596,7 @@ function startMode(mode: "daily" | "endless", puzzleNumber?: number): void {
   strip = null;
   activeZoom = null;
   guessInputInvalid = false;
+  const texts = activeTexts();
   round =
     mode === "daily"
       ? puzzleNumber == null
@@ -205,6 +613,71 @@ function startMode(mode: "daily" | "endless", puzzleNumber?: number): void {
       strip.reveal(round.poolItem.verseIndex);
     }
   });
+}
+
+/** Refresh round verse + paragraph strings from the selected translation. */
+function applyTranslationToRound(): void {
+  if (!round) return;
+  const t = activeTexts();
+  const key = round.poolItem.ref;
+  round.verseText = t.verses[key] ?? "(text unavailable)";
+  round.paragraph = t.paragraphs[key] ?? null;
+}
+
+function setTranslation(next: TranslationId): void {
+  if (next === translation) return;
+  translation = next;
+  saveTranslation(next);
+  applyTranslationToRound();
+  // Patch live verse chrome without rebuilding the whole play surface.
+  const verseEl = document.querySelector("#verse-text");
+  if (verseEl && round) verseEl.textContent = round.verseText;
+  const hintHost = document.querySelector("#hint-panel");
+  if (hintHost && round) {
+    const rebuilt = makeHintPanel(round);
+    if (rebuilt) hintHost.replaceWith(rebuilt);
+    else hintHost.remove();
+  } else if (!hintHost && round) {
+    const dock = document.querySelector(".dock");
+    const panel = makeHintPanel(round);
+    if (dock && panel) dock.prepend(panel);
+  }
+  document
+    .querySelectorAll<HTMLButtonElement>(".translation-chip button")
+    .forEach((btn) => {
+      const id = btn.dataset.translation as TranslationId | undefined;
+      btn.classList.toggle("is-active", id === translation);
+      btn.setAttribute("aria-pressed", id === translation ? "true" : "false");
+    });
+}
+
+/** Very quiet KJV / BSB switch beside the verse. */
+function makeTranslationChip(): HTMLElement {
+  const chip = el("div", {
+    class: "translation-chip",
+    role: "group",
+    "aria-label": "Bible translation",
+  });
+  // BSB first (default), KJV second — quiet secondary control.
+  for (const id of ["bsb", "kjv"] as const) {
+    const btn = el("button", {
+      type: "button",
+      class: id === translation ? "is-active" : "",
+      "data-translation": id,
+      "aria-pressed": id === translation ? "true" : "false",
+      text: id.toUpperCase(),
+      title:
+        id === "kjv"
+          ? "King James Version"
+          : "Berean Standard Bible",
+    });
+    btn.addEventListener("click", () => {
+      hapticLight();
+      setTranslation(id);
+    });
+    chip.append(btn);
+  }
+  return chip;
 }
 
 function renderPlay(): void {
@@ -273,49 +746,67 @@ function renderPlay(): void {
     "aria-label": modeAria,
     title: modeAria,
   });
-  /* Map zooms sit with nav chrome while placing — hide on result to reduce noise */
+  const hasMarker = provisionalGuess != null;
+
+  /*
+   * Header center: OT · NT · Book (playing) with BSB | KJV to the right.
+   * On result, only the translation chip sits in that slot.
+   */
+  const center = el("div", {
+    class: "top-center",
+    role: "group",
+    "aria-label": "Map and translation",
+  });
   if (round.phase === "playing") {
-    top.append(
-      back,
-      makeZoomBar(),
-      mode
-    );
-  } else {
-    top.append(back, mode);
+    center.append(makeZoomBar());
   }
-  hud.append(top);
+  center.append(makeTranslationChip());
+  top.append(back, center, mode);
+
+  /* Top chrome is one grid row (home + center + mode). */
+  const chrome = el("div", { class: "hud-chrome" });
+  chrome.append(top);
+  hud.append(chrome);
 
   /* Verse band — same horizontal measure as the dock */
   const verseBand = el("div", { class: "verse-band" });
   const card = el("div", { class: "card", id: "verse-card" });
-  card.append(el("p", { class: "verse", id: "verse-text", text: round.verseText }));
+  card.append(
+    el("p", { class: "verse", id: "verse-text", text: round.verseText })
+  );
   verseBand.append(card);
   hud.append(verseBand);
 
   /* Transparent mid — hits pass through to the board */
   const hudMid = el("div", { class: "hud-mid" });
+  const cueText =
+    provisionalGuess == null
+      ? "Place roughly on the timeline, then refine"
+      : "Refine on the notches, then Confirm";
   hudMid.append(
     el("p", {
       class: "sr-only",
       id: "timeline-instructions",
-      text: "Tap or drag to place a marker. The timeline zooms in automatically; drag across the verse notches to choose the exact verse. Arrow keys move one verse, Shift plus an arrow moves ten, and Enter confirms.",
+      text: "Place a marker roughly on the canon timeline. The view zooms in so you can refine with verse notches. Or type a Bible reference. Arrow keys move one verse, Shift plus arrow moves ten, Enter confirms.",
     }),
     el("p", {
-      class: `timeline-cue${provisionalGuess == null ? "" : " is-hidden"}`,
+      class: `timeline-cue${provisionalGuess == null ? "" : " is-refine"}`,
       id: "timeline-cue",
       "aria-hidden": "true",
-      text: "Tap or drag to place your marker",
+      text: cueText,
     })
   );
   hud.append(hudMid);
 
   const dock = el("div", { class: "dock" });
+  hud.dataset.hasMarker = hasMarker ? "true" : "false";
 
   /* Hints sit under the timeline, above readout / actions */
   const hintPanel = makeHintPanel(round);
   if (hintPanel) dock.append(hintPanel);
 
   if (round.phase === "playing") {
+    // Type field always available; zoom/hint still wait for a marker.
     const guessTools = el("div", { class: "guess-tools" });
     guessTools.append(makePrecisionZoomOut(), makeGuessInput());
     dock.append(guessTools);
@@ -327,15 +818,24 @@ function renderPlay(): void {
       id: "btn-hint",
       text: "Hint",
     });
-    if (round.hintStep >= 3) hintBtn.disabled = true;
+    const hintsExhausted = !canTakeHint(round);
+    if (hintsExhausted) hintBtn.disabled = true;
+    // Hidden until a marker exists — no score path without a guess.
+    if (!hasMarker) {
+      hintBtn.hidden = true;
+      hintBtn.tabIndex = -1;
+    }
     hintBtn.setAttribute(
       "aria-label",
-      round.hintStep >= 3
-        ? "All hints used"
-        : "Take a hint"
+      hintsExhausted ? "All hints used" : "Take a hint"
     );
+    hintBtn.title = hintsExhausted
+      ? "All hints used"
+      : round.hintStep === 1
+        ? "Shows surrounding text or testament half · score ×2"
+        : "Shows testament half · score ×1";
     hintBtn.addEventListener("click", () => {
-      if (!round || round.hintStep >= 3) return;
+      if (!round || !canTakeHint(round)) return;
       hapticLight();
       round = takeHint(round);
       renderPlay();
@@ -361,13 +861,14 @@ function renderPlay(): void {
       }
       if (provisionalGuess == null) return;
       const locked = strip?.lockGuess() ?? provisionalGuess;
-      const { round: next } = confirmGuess(round, locked);
+      const { round: next, newlyUnlocked } = confirmGuess(round, locked);
       round = next;
       provisionalGuess = locked;
       activeZoom = null;
       hapticResult(locked === round.poolItem.verseIndex);
       // Rebuild the play surface in result mode (new strip snaps full-canon).
       renderPlay();
+      if (newlyUnlocked.length) showUnlockToast(newlyUnlocked);
     });
 
     actions.append(hintBtn, confirm);
@@ -389,6 +890,7 @@ function renderPlay(): void {
     syncConfirmEnabled();
     syncGuessInputFromMarker();
     syncTimelineCue();
+    syncPlayStage();
     const zoomBar = document.querySelector<HTMLElement>(".zoom-bar");
     if (zoomBar) syncZoomBarUI(zoomBar);
   });
@@ -420,17 +922,21 @@ function renderPlay(): void {
 function syncChromeInsets(): void {
   if (!strip) return;
   const board = document.querySelector(".board-wrap");
+  const chrome = document.querySelector(".hud-chrome");
   const topBar = document.querySelector(".top-bar");
   const verseBand = document.querySelector(".verse-band");
   const dock = document.querySelector(".dock");
   if (!board) return;
 
   const br = board.getBoundingClientRect();
+  // Free band starts below the verse (which sits under top chrome + install).
   const topEdge = verseBand
     ? verseBand.getBoundingClientRect().bottom
-    : topBar
-      ? topBar.getBoundingClientRect().bottom
-      : br.top;
+    : chrome
+      ? chrome.getBoundingClientRect().bottom
+      : topBar
+        ? topBar.getBoundingClientRect().bottom
+        : br.top;
   const bottomEdge = dock ? dock.getBoundingClientRect().top : br.bottom;
 
   /* Extra room so marker labels (~24px) clear the chrome gradients */
@@ -484,7 +990,7 @@ function makeGuessInput(): HTMLElement {
     "aria-haspopup": "listbox",
     "aria-label": "Your guess — type a Bible reference or tap the timeline",
     "aria-errormessage": "guess-error",
-    placeholder: "Type a reference or tap the timeline",
+    placeholder: "John 3:16",
   }) as HTMLInputElement;
   if (provisionalGuess != null) {
     guessInputInvalid = false;
@@ -695,7 +1201,28 @@ function syncConfirmEnabled(): void {
 
 function syncTimelineCue(): void {
   const cue = document.querySelector("#timeline-cue");
-  cue?.classList.toggle("is-hidden", provisionalGuess != null);
+  if (!cue) return;
+  if (provisionalGuess == null) {
+    cue.textContent = "Place roughly on the timeline, then refine";
+    cue.classList.remove("is-hidden", "is-refine");
+    return;
+  }
+  cue.textContent = "Refine on the notches, then Confirm";
+  cue.classList.add("is-refine");
+  cue.classList.remove("is-hidden");
+}
+
+/** Progressive disclosure: zoom + hint after a marker (type field always on). */
+function syncPlayStage(): void {
+  const hud = document.querySelector<HTMLElement>(".hud");
+  if (!hud) return;
+  const hasMarker = provisionalGuess != null;
+  hud.dataset.hasMarker = hasMarker ? "true" : "false";
+  const hintBtn = document.querySelector<HTMLButtonElement>("#btn-hint");
+  if (hintBtn) {
+    hintBtn.hidden = !hasMarker;
+    hintBtn.tabIndex = hasMarker ? 0 : -1;
+  }
 }
 
 /** Push marker placement into the text field (unless the user is typing). */
@@ -721,7 +1248,7 @@ function syncGuessInputFromMarker(): void {
 }
 
 function continueDailyRound(current: RoundData): void {
-  round = advanceDailyRound(current, texts);
+  round = advanceDailyRound(current, activeTexts());
   provisionalGuess = null;
   activeZoom = null;
   renderPlay();
@@ -779,13 +1306,19 @@ function makeResultPanel(round: RoundData): HTMLElement {
     const summary = el("ol", { class: "daily-summary", "aria-label": "Daily verse scores" });
     round.daily!.results.forEach((item, index) => {
       const distance = item.distance === 0 ? "Exact" : `${item.distance} verses off`;
+      const detail = el("span", { class: "daily-summary-detail" });
+      detail.append(
+        document.createTextNode(`${distance} · `),
+        el("strong", { class: "daily-summary-pts", text: `${item.total} pts` })
+      );
       summary.append(el("li", { class: "daily-summary-row" }, [
         el("span", { text: `${index + 1}. ${item.trueRef}` }),
-        el("span", { text: `${distance} · ${item.total} pts` }),
+        detail,
       ]));
     });
     panel.append(summary);
   }
+
   const shareTextBody = shareForRound(round);
   if (shareTextBody) {
     const shareBtn = el("button", {
@@ -847,6 +1380,16 @@ function makeResultPanel(round: RoundData): HTMLElement {
     actions.classList.add("result-actions--solo");
   }
   if (actions.childNodes.length) panel.append(actions);
+
+  // Install after primary actions so Share / Next own the emotional peak.
+  const offerInstall =
+    shouldOfferInstall() &&
+    (dailyComplete || round.mode === "endless");
+  if (offerInstall) {
+    const banner = makeInstallBanner();
+    if (banner) panel.append(banner);
+  }
+
   return panel;
 }
 
@@ -854,12 +1397,22 @@ function makeResultPanel(round: RoundData): HTMLElement {
 function makeHintPanel(round: RoundData): HTMLElement | null {
   if (round.hintStep < 2) return null;
 
+  const usefulPara = isUsefulParagraph(
+    round.paragraph,
+    round.poolItem.verse
+  );
+  // Singleton paragraphs equal the verse already shown — skip them.
+  // In that case the first hint surfaces the testament-half label instead.
+  const showParagraph = usefulPara;
+  const showQuadrant = round.hintStep >= 3 || !usefulPara;
+  if (!showParagraph && !showQuadrant) return null;
+
   const panel = el("div", {
     class: "hint-panel",
     id: "hint-panel",
   });
 
-  if (round.paragraph) {
+  if (showParagraph && round.paragraph) {
     const p = el("p", { class: "paragraph", id: "paragraph-hint" });
     for (const v of round.paragraph.verses) {
       const span = el("span");
@@ -872,7 +1425,7 @@ function makeHintPanel(round: RoundData): HTMLElement | null {
     panel.append(p);
   }
 
-  if (round.hintStep >= 3) {
+  if (showQuadrant) {
     panel.append(
       el("p", {
         class: "quadrant",
@@ -953,6 +1506,7 @@ function makeZoomBar(): HTMLElement {
     role: "group",
     "aria-label": "Timeline zoom",
   });
+  // Note: BSB | KJV is a sibling after this bar in .top-center (not inside).
   ZOOM_PRESETS.forEach((p, i) => {
     if (i > 0) {
       bar.append(el("span", { class: "zoom-sep", "aria-hidden": "true", text: "·" }));
@@ -1059,6 +1613,88 @@ function installDebugApi(): void {
   };
 }
 
+/**
+ * Quiet install pitch after engagement — result dock footer, below Share/Next.
+ * Chrome: native install sheet. iOS: Share → Add to Home Screen.
+ */
+function makeInstallBanner(): HTMLElement | null {
+  if (!shouldOfferInstall()) return null;
+
+  const banner = el("div", {
+    class: "install-strip install-strip--result",
+    role: "region",
+    "aria-label": "Install Versemark",
+    id: "install-banner-result",
+  });
+
+  const row = el("div", { class: "install-strip-row" });
+  row.append(
+    el("p", {
+      class: "install-strip-copy",
+      text: "Install for offline play",
+    })
+  );
+
+  const actions = el("div", { class: "install-strip-actions" });
+  const dismiss = el("button", {
+    class: "install-strip-dismiss",
+    type: "button",
+    id: "btn-install-dismiss",
+    text: "Not now",
+  });
+  dismiss.addEventListener("click", () => {
+    hapticLight();
+    snoozeInstallOffer();
+    banner.remove();
+  });
+
+  const install = el("button", {
+    class: "install-strip-cta",
+    type: "button",
+    id: "btn-install",
+    text: "Install app",
+  });
+
+  const hint = el("p", {
+    class: "install-strip-hint",
+    id: "install-hint",
+    hidden: "true",
+    text: "",
+  });
+
+  let showingManualHint = false;
+  install.addEventListener("click", async () => {
+    hapticLight();
+    if (showingManualHint) {
+      snoozeInstallOffer();
+      banner.remove();
+      return;
+    }
+    const result = await promptInstall();
+    if (result === "ios-hint") {
+      showingManualHint = true;
+      hint.textContent = "On iPhone: tap Share, then Add to Home Screen.";
+      hint.hidden = false;
+      install.textContent = "Got it";
+      return;
+    }
+    if (result === "unavailable") {
+      showingManualHint = true;
+      hint.textContent =
+        "Use your browser menu to Install app or Add to Home Screen.";
+      hint.hidden = false;
+      install.textContent = "Got it";
+      return;
+    }
+    banner.remove();
+  });
+
+  actions.append(dismiss, install);
+  row.append(actions);
+  banner.append(row, hint);
+  return banner;
+}
+
 async function main(): Promise<void> {
   try {
     await loadData();
@@ -1067,6 +1703,7 @@ async function main(): Promise<void> {
     console.error(e);
     return;
   }
+  initInstallCapture();
   void initSounds();
   installDebugApi();
   const params = new URLSearchParams(window.location.search);

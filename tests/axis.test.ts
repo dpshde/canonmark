@@ -30,6 +30,7 @@ import {
   QUADRANTS,
   BOOKS,
   formatVerseLabel,
+  routeBibleUrl,
 } from "../src/lib/books";
 
 describe("canon axis metadata", () => {
@@ -59,6 +60,16 @@ describe("canon axis metadata", () => {
     expect(loc?.book.osis).toBe("MAT");
     expect(loc?.chapter).toBe(1);
     expect(loc?.verse).toBe(1);
+  });
+
+  it("routeBibleUrl builds lowercase OSIS path for route.bible", () => {
+    const john = verseIndexFor("JHN", 3, 16);
+    expect(john).not.toBeNull();
+    expect(routeBibleUrl(john!)).toBe("https://www.route.bible/jhn.3.16");
+    const song = verseIndexFor("SNG", 2, 1);
+    expect(song).not.toBeNull();
+    expect(routeBibleUrl(song!)).toBe("https://www.route.bible/sng.2.1");
+    expect(routeBibleUrl(0)).toBeNull();
   });
 
   it("formatVerseLabel is Book Chapter:Verse", () => {
@@ -181,11 +192,13 @@ describe("zoom presets", () => {
     expect(vp.span).toBeGreaterThan(loc.book.verses * 0.9);
   });
 
-  it("precision view gives a verse-resolvable neighborhood around the marker", () => {
+  it("precision view gives a ~5–6 chapter neighborhood around the marker", () => {
     const john316 = verseIndexFor("JHN", 3, 16)!;
     const vp = viewportForPrecision(base, john316);
     expect(vp.center).toBe(john316);
-    expect(vp.span).toBe(80);
+    // ~151 verses ≈ 5–6 average chapters (canon ~26 verses/chapter)
+    expect(vp.span).toBeGreaterThanOrEqual(150);
+    expect(vp.span).toBeLessThanOrEqual(160);
     expect(vp.center - vp.span / 2).toBeLessThan(john316);
     expect(vp.center + vp.span / 2).toBeGreaterThan(john316);
   });
@@ -194,9 +207,9 @@ describe("zoom presets", () => {
     const beginning = viewportForPrecision(base, 1);
     const end = viewportForPrecision(base, TOTAL_VERSES);
 
-    expect(beginning.span).toBe(80);
+    expect(beginning.span).toBe(150);
     expect(beginning.center - beginning.span / 2).toBe(1);
-    expect(end.span).toBe(80);
+    expect(end.span).toBe(150);
     expect(end.center + end.span / 2).toBe(TOTAL_VERSES);
     expect(panViewport(beginning, -100).center).toBe(beginning.center);
     expect(panViewport(end, 100).center).toBe(end.center);

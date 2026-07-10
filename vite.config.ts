@@ -21,7 +21,8 @@ export default defineConfig({
       workbox: {
         // App shell + bundled assets + static data for offline daily play.
         globPatterns: [
-          "**/*.{js,css,html,ico,png,svg,webmanifest,json,woff2}",
+          // jpg: achievement drop caps under public/assets/achievements/
+          "**/*.{js,css,html,ico,png,jpg,jpeg,svg,webmanifest,json,woff2}",
         ],
         navigateFallback: "index.html",
         cleanupOutdatedCaches: true,

@@ -6,7 +6,7 @@ The goal is **familiarity**: building the mental map of where things live in Scr
 
 ## Modes
 
-- **Daily**: one puzzle per day, same for everyone, seeded from the date. Wordle-class pure-text share (`Versemark N score` + emoji grid; no URL/CTA).
+- **Daily**: one puzzle per day, same for everyone, seeded from the date. Wordle-class pure-text share (star + date + scores + site URL).
 - **Endless practice**: unlimited rounds for reps.
 
 ## Quick start
@@ -30,9 +30,9 @@ Shipped data under `public/data/` (pool, BSB verse/paragraph text for pool entri
 | UI | DOM cards, hints, score, share |
 | Daily | Epoch `2026-08-01` local = #1; seed `"versemark#" + N` → xmur3 → mulberry32; weighted pool + 180 no-repeat window |
 | Score | `round(1000 * 0.5^(d/40))` × hint multiplier (×3 / ×2 / ×1) |
-| Text | Berean Standard Bible (public domain), pool snapshot from Exedra topic rankings |
+| Text | BSB (default) + KJV (public domain); pool snapshot from Exedra topic rankings |
 | State | `localStorage` for daily results / streak |
-| URL | `https://versemark.app` (site / optional deep links; default share body is link-free) |
+| URL | `https://versemark.app` (site / optional deep links; included at end of share text) |
 
 ## Production deploy
 
@@ -42,7 +42,8 @@ Shipped data under `public/data/` (pool, BSB verse/paragraph text for pool entri
 | DNS | Apex **A** → `216.198.79.1` (Vercel) |
 | Host | Vercel project **`versemark`** → team **`dpshde`** (GitHub `dpshde/versemark`) |
 | Config | `vercel.json` (Vite build → `dist`, cache headers) |
-| App URL in code | `APP_URL` in `src/lib/share.ts` (not embedded in default share text) |
+| App URL in code | `APP_URL` in `src/lib/share.ts` (appended to share text) |
+| Analytics | Fathom site **`IFLWYVVU`** (`index.html` embed; dashboard site “Versemark”) |
 
 Ship latest `main` (or `vercel --prod` from a clean tree) so production HTML says **Versemark**, not the older Canonmark build.
 

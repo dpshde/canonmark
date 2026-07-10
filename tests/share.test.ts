@@ -46,9 +46,10 @@ describe("share string", () => {
     ];
     const s = buildDailyShareString(12, rounds);
     expect(s).toBe(
-      "Versemark 12 Aug 2026 · 2100 pts\n\n980 · 720 · 310 · 90"
+      "Versemark 12 Aug 2026 · 2100 pts\n\n980 · 720 · 310 · 90\n\nhttps://versemark.app"
     );
-    expect(s).not.toContain("http");
+    expect(s).toContain("https://versemark.app");
+    expect(s).not.toMatch(/⭐|✨/);
     expect(s).not.toMatch(/Versemark \d+ \d+$/m); // no bare puzzle# total
   });
 
@@ -61,7 +62,7 @@ describe("share string", () => {
       total: 900,
       hintStep: 2,
     });
-    expect(s).toBe("Versemark · 900 pts\n\n900");
+    expect(s).toBe("Versemark · 900 pts\n\n900\n\nhttps://versemark.app");
   });
 
   it("single daily-style round uses date + pts", () => {
@@ -73,7 +74,9 @@ describe("share string", () => {
       total: 1500,
       hintStep: 1,
     });
-    expect(s).toBe("Versemark 1 Aug 2026 · 1500 pts\n\n1500");
+    expect(s).toBe(
+      "Versemark 1 Aug 2026 · 1500 pts\n\n1500\n\nhttps://versemark.app"
+    );
   });
 
   it("formatPoints always includes unit", () => {

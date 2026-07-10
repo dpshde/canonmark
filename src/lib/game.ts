@@ -17,10 +17,21 @@ import { buildDailyShareString, buildShareString } from "./share";
 import {
   getDailyForPuzzle,
   recordDailyResult,
+  recordPracticeResult,
+  mergeAchievementUnlocks,
+  bumpLifetimeForRound,
+  updateLifetime,
   localDateKey,
   loadState,
   type AppState,
+  type DailyRoundRecord,
+  type RoundRecord,
 } from "./storage";
+import {
+  evaluateAchievements,
+  lifetimeFlagsForRound,
+} from "./achievements";
+import { effectiveDistance } from "./mastery";
 
 export type GameMode = "daily" | "endless";
 
@@ -44,10 +55,48 @@ export interface RoundData {
 export interface DailyVerseResult {
   trueRef: string;
   trueVerseIndex: number;
+  trueRangeEndVerseIndex?: number;
   guessVerseIndex: number;
   distance: number;
   total: number;
   hintStep: HintStep;
+  at?: string;
+  source?: "daily" | "practice";
+}
+
+function rangeEndVerseIndex(item: PoolItem): number {
+  if (item.rangeEnd <= item.verse) return item.verseIndex;
+  return item.verseIndex + (item.rangeEnd - item.verse);
+}
+
+function toRoundRecord(
+  item: PoolItem,
+  guessVerseIndex: number,
+  distance: number,
+  total: number,
+  hintStep: number,
+  source: "daily" | "practice",
+  at: string
+): RoundRecord {
+  const start = trueVerseIndex(item);
+  return {
+    trueRef: item.ref,
+    trueVerseIndex: start,
+    trueRangeEndVerseIndex: rangeEndVerseIndex(item),
+    guessVerseIndex,
+    distance,
+    total,
+    hintStep,
+    at,
+    source,
+  };
+}
+
+function syncUnlocks(now: Date): string[] {
+  const state = loadState();
+  const proposed = evaluateAchievements(state);
+  const { newlyUnlocked } = mergeAchievementUnlocks(proposed, now);
+  return newlyUnlocked;
 }
 
 export interface TextBundle {
@@ -62,6 +111,56 @@ function trueVerseIndex(item: PoolItem): number {
   return item.verseIndex;
 }
 
+function scoreResultFromSaved(last: DailyRoundRecord): ScoreResult {
+  const multiplier = last.hintStep === 1 ? 3 : last.hintStep === 2 ? 2 : 1;
+  return {
+    distance: last.distance,
+    distancePts: Math.round(last.total / multiplier),
+    proximityBonus: 0,
+    hintStep: last.hintStep as HintStep,
+    multiplier,
+    total: last.total,
+  };
+}
+
+function bindVerse(
+  n: number,
+  items: PoolItem[],
+  index: number,
+  texts: TextBundle,
+  results: DailyVerseResult[],
+  revealed: DailyRoundRecord | null
+): RoundData {
+  const item = items[index];
+  const verseKey = item.ref;
+  if (revealed) {
+    return {
+      mode: "daily",
+      puzzleNumber: n,
+      poolItem: item,
+      verseText: texts.verses[verseKey] ?? "(text unavailable)",
+      paragraph: texts.paragraphs[verseKey] ?? null,
+      hintStep: revealed.hintStep as HintStep,
+      phase: "revealed",
+      guessVerseIndex: revealed.guessVerseIndex,
+      result: scoreResultFromSaved(revealed),
+      daily: { index, items, results },
+    };
+  }
+  return {
+    mode: "daily",
+    puzzleNumber: n,
+    poolItem: item,
+    verseText: texts.verses[verseKey] ?? "(text unavailable)",
+    paragraph: texts.paragraphs[verseKey] ?? null,
+    hintStep: 1,
+    phase: "playing",
+    guessVerseIndex: null,
+    result: null,
+    daily: { index, items, results },
+  };
+}
+
 export function startDailyRound(
   pool: PoolItem[],
   texts: TextBundle,
@@ -71,6 +170,11 @@ export function startDailyRound(
   return startDailyRoundForPuzzle(pool, texts, n);
 }
 
+/**
+ * Start or resume a daily. Partial progress restores the last confirmed
+ * verse in the revealed phase so the player can advance; a finished daily
+ * restores the final summary/share screen.
+ */
 export function startDailyRoundForPuzzle(
   pool: PoolItem[],
   texts: TextBundle,
@@ -78,50 +182,22 @@ export function startDailyRoundForPuzzle(
 ): RoundData {
   const existing = getDailyForPuzzle(n);
   const items = selectPoolItemsForPuzzle(n, pool);
-  const saved = existing?.rounds?.length === items.length ? existing.rounds : null;
-  const index = saved ? items.length - 1 : 0;
-  const item = items[index];
-  const verseKey = item.ref;
-  const verseText = texts.verses[verseKey] ?? "(text unavailable)";
-  const paragraph = texts.paragraphs[verseKey] ?? null;
+  const saved = existing?.rounds ?? [];
 
-  if (existing && saved) {
-    const last = saved[saved.length - 1];
-    return {
-      mode: "daily",
-      puzzleNumber: n,
-      poolItem: item,
-      verseText,
-      paragraph,
-      hintStep: last.hintStep as HintStep,
-      phase: "revealed",
-      guessVerseIndex: last.guessVerseIndex,
-      result: {
-        distance: last.distance,
-        distancePts: Math.round(
-          last.total / (last.hintStep === 1 ? 3 : last.hintStep === 2 ? 2 : 1)
-        ),
-        proximityBonus: 0,
-        hintStep: last.hintStep as HintStep,
-        multiplier: last.hintStep === 1 ? 3 : last.hintStep === 2 ? 2 : 1,
-        total: last.total,
-      },
-      daily: { index, items, results: saved as DailyVerseResult[] },
-    };
+  if (saved.length >= items.length) {
+    // Complete: land on the last verse, fully revealed (summary + share).
+    const index = items.length - 1;
+    const results = saved.slice(0, items.length) as DailyVerseResult[];
+    return bindVerse(n, items, index, texts, results, saved[index]);
+  }
+  if (saved.length > 0) {
+    // Partial: show the last confirmed verse revealed (Next continues).
+    const index = saved.length - 1;
+    const results = saved as DailyVerseResult[];
+    return bindVerse(n, items, index, texts, results, saved[index]);
   }
 
-  return {
-    mode: "daily",
-    puzzleNumber: n,
-    poolItem: item,
-    verseText,
-    paragraph,
-    hintStep: 1,
-    phase: "playing",
-    guessVerseIndex: null,
-    result: null,
-    daily: { index, items, results: [] },
-  };
+  return bindVerse(n, items, 0, texts, [], null);
 }
 
 export function startEndlessRound(
@@ -162,8 +238,39 @@ export function advanceDailyRound(round: RoundData, texts: TextBundle): RoundDat
   };
 }
 
+/**
+ * Paragraph hint is only worth a step when it adds surrounding text.
+ * Single-verse "paragraphs" (common for short pericopes) equal the verse
+ * already on screen — skip them so Hint always teaches something new.
+ */
+export function isUsefulParagraph(
+  paragraph: RoundData["paragraph"],
+  focusVerse: number
+): boolean {
+  if (!paragraph?.verses?.length) return false;
+  if (paragraph.verses.length >= 2) return true;
+  // One line that isn't the focus could still help; identical focus is noise.
+  return paragraph.verses[0].v !== focusVerse;
+}
+
+/** True when another hint click would reveal new information. */
+export function canTakeHint(round: RoundData): boolean {
+  if (round.phase !== "playing") return false;
+  if (round.hintStep >= 3) return false;
+  // At step 2 with no useful paragraph, testament-half is already shown.
+  if (
+    round.hintStep === 2 &&
+    !isUsefulParagraph(round.paragraph, round.poolItem.verse)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export function takeHint(round: RoundData): RoundData {
-  if (round.phase !== "playing") return round;
+  if (!canTakeHint(round)) return round;
+  // Step 2 with a singleton paragraph still only costs one tier (×2);
+  // makeHintPanel surfaces the testament-half label instead of the verse again.
   const next = Math.min(3, (round.hintStep + 1) as HintStep) as HintStep;
   return { ...round, hintStep: next };
 }
@@ -172,12 +279,24 @@ export function confirmGuess(
   round: RoundData,
   guessVerseIndex: number,
   now: Date = new Date()
-): { round: RoundData; appState: AppState | null } {
+): { round: RoundData; appState: AppState | null; newlyUnlocked: string[] } {
   if (round.phase !== "playing") {
-    return { round, appState: null };
+    return { round, appState: null, newlyUnlocked: [] };
   }
   const truth = trueVerseIndex(round.poolItem);
   const result = scoreRound(guessVerseIndex, truth, round.hintStep);
+  const at = now.toISOString();
+  const verseResult: DailyVerseResult = {
+    trueRef: round.poolItem.ref,
+    trueVerseIndex: truth,
+    trueRangeEndVerseIndex: rangeEndVerseIndex(round.poolItem),
+    guessVerseIndex,
+    distance: result.distance,
+    total: result.total,
+    hintStep: result.hintStep,
+    at,
+    source: round.mode === "endless" ? "practice" : "daily",
+  };
   const next: RoundData = {
     ...round,
     phase: "revealed",
@@ -188,24 +307,41 @@ export function confirmGuess(
   if (next.daily) {
     next.daily = {
       ...next.daily,
-      results: [...next.daily.results, {
-        trueRef: round.poolItem.ref,
-        trueVerseIndex: truth,
-        guessVerseIndex,
-        distance: result.distance,
-        total: result.total,
-        hintStep: result.hintStep,
-      }],
+      results: [...next.daily.results, verseResult],
     };
   }
 
   let appState: AppState | null = null;
-  const completedDaily =
-    next.daily && next.daily.results.length === next.daily.items.length
-      ? next.daily
-      : null;
-  if (round.mode === "daily" && round.puzzleNumber != null && completedDaily) {
-    const aggregate = completedDaily.results.reduce((sum, item) => sum + item.total, 0);
+  let newlyUnlocked: string[] = [];
+
+  const finishedRecord = toRoundRecord(
+    round.poolItem,
+    guessVerseIndex,
+    result.distance,
+    result.total,
+    result.hintStep,
+    round.mode === "endless" ? "practice" : "daily",
+    at
+  );
+  const flags = lifetimeFlagsForRound(finishedRecord);
+
+  // Persist after every confirmed daily verse so refresh mid-run resumes.
+  if (round.mode === "daily" && round.puzzleNumber != null && next.daily) {
+    const results = next.daily.results;
+    const complete = results.length >= next.daily.items.length;
+    const aggregate = results.reduce((sum, item) => sum + item.total, 0);
+    const rounds: RoundRecord[] = results.map((r) => ({
+      trueRef: r.trueRef,
+      trueVerseIndex: r.trueVerseIndex,
+      trueRangeEndVerseIndex:
+        r.trueRangeEndVerseIndex ?? r.trueVerseIndex,
+      guessVerseIndex: r.guessVerseIndex,
+      distance: r.distance,
+      total: r.total,
+      hintStep: r.hintStep,
+      at: r.at ?? at,
+      source: "daily" as const,
+    }));
     appState = recordDailyResult(
       {
         puzzleNumber: round.puzzleNumber,
@@ -216,14 +352,33 @@ export function confirmGuess(
         distance: result.distance,
         total: aggregate,
         hintStep: result.hintStep,
-        completedAt: now.toISOString(),
-        rounds: completedDaily.results,
+        completedAt: complete ? now.toISOString() : null,
+        rounds,
       },
       now
     );
+    // Lifetime: every confirmed verse + daily tallies on full finish.
+    const nextLife = bumpLifetimeForRound(appState, flags);
+    if (complete) {
+      nextLife.completedDailies += 1;
+      if (rounds.length >= 4) {
+        if (rounds.every((r) => effectiveDistance(r) === 0)) {
+          nextLife.cleanSheets += 1;
+        }
+        if (rounds.every((r) => (Number(r.hintStep) || 1) <= 1)) {
+          nextLife.noHintDailies += 1;
+        }
+      }
+    }
+    appState = updateLifetime(nextLife);
+    // Unlock after every verse so mid-daily exacts surface immediately.
+    newlyUnlocked = syncUnlocks(now);
+  } else if (round.mode === "endless") {
+    appState = recordPracticeResult(finishedRecord, flags);
+    newlyUnlocked = syncUnlocks(now);
   }
 
-  return { round: next, appState };
+  return { round: next, appState, newlyUnlocked };
 }
 
 export function shareForRound(round: RoundData): string | null {

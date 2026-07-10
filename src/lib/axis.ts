@@ -325,14 +325,18 @@ export function viewportForZoomPreset(
   );
 }
 
-/** Verse-resolvable local view used after the player's broad placement. */
+/**
+ * Local view after the player's broad placement.
+ * Span targets ~5–6 average chapters (~26 verses each) — a shotgun
+ * neighborhood for fine placement, not a single-chapter microscope.
+ */
 export function viewportForPrecision(
   viewport: Viewport,
   focusVerse: number
 ): Viewport {
   const focus = clampVerse(focusVerse);
-  return viewportForRange(viewport, focus - 30, focus + 30, {
-    pad: 1.1,
-    minSpan: 80,
+  return viewportForRange(viewport, focus - 75, focus + 75, {
+    pad: 1,
+    minSpan: 150,
   });
 }

@@ -29,6 +29,7 @@ import {
   TESTAMENT_SEAM_AFTER,
   bookChapterVerseFromIndex,
   formatVerseLabel,
+  routeBibleUrl,
 } from "./books";
 import { hapticLight, hapticSelection } from "./haptics";
 
@@ -46,18 +47,19 @@ const BG = "#faf8f4";
 const SERIF = 'Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif';
 const REVEAL_MS = 800;
 const PRECISION_ZOOM_MS = 220;
-const PRECISION_THRESHOLD = 120;
+/** Span at or below this counts as precision (must cover viewportForPrecision). */
+const PRECISION_THRESHOLD = 180;
 const NOTCH_GAP = 8;
 const ACTIVE_NOTCH_LENGTH = 28;
 
-/** Genre segment tints — whisper-level warm/cool shifts. */
+/** Genre segment tints — soft but readable warm/cool bands along the rail. */
 const GENRE_TINT: Record<string, string> = {
-  law: "#e2e4e0",
-  history: "#ebe5d8",
-  poetry: "#e4e0e8",
-  prophets: "#ebe0d8",
-  gospels: "#f0e8d8",
-  epistles: "#e0e8e2",
+  law: "#c5d6b8",
+  history: "#e8d4a4",
+  poetry: "#d4c4e6",
+  prophets: "#e8c49a",
+  gospels: "#edd08c",
+  epistles: "#b8d4c4",
 };
 
 /* ———— Types ———— */
@@ -71,6 +73,24 @@ export interface StripState {
 }
 
 interface Point { x: number; y: number }
+
+/** Precomputed YOU/TRUE chip box (portrait pair layout). */
+interface ResultChipLayout {
+  bx: number;
+  by: number;
+  bw: number;
+  bh: number;
+}
+
+/** Hit target for a result chip → route.bible link overlay. */
+interface ResultLinkHit {
+  verseIndex: number;
+  bx: number;
+  by: number;
+  bw: number;
+  bh: number;
+  role: string;
+}
 
 /* ———— Class ———— */
 
@@ -114,6 +134,9 @@ export class CanonStrip {
   private revealProgress = 0;
   /** Insets in CSS px (canvas layout space) for verse / dock chrome. */
   private chrome: ChromeInsets = { top: 0, bottom: 0, start: 0, end: 0 };
+  /** Result-page YOU/TRUE chip boxes for DOM link overlays. */
+  private resultLinkHits: ResultLinkHit[] = [];
+  private linkLayer: HTMLDivElement | null = null;
 
   /**
    * Fraction of the axis length that counts as an edge zone (top/bottom or
@@ -712,6 +735,9 @@ export class CanonStrip {
     cancelAnimationFrame(this.animFrame);
     this.stopViewportAnimation();
     this.stopEdgeScroll();
+    this.clearResultLinks();
+    this.linkLayer?.remove();
+    this.linkLayer = null;
   }
 
   /* ———— Geometry ———— */
@@ -793,6 +819,7 @@ export class CanonStrip {
 
     this.ctx.imageSmoothingEnabled = true;
     this.ctx.imageSmoothingQuality = "high";
+    this.resultLinkHits = [];
 
     this.drawBackground(w, h);
     // Always keep genre-tinted segments — they orient you on the close-up
@@ -811,7 +838,8 @@ export class CanonStrip {
       if (guess != null && guess !== truth) {
         this.drawConnector(guess, truth, w, h);
         // Landscape: opposite sides along the rail. Portrait: YOU left / TRUE
-        // right of the rail so close misses never stack into one chip.
+        // right of the rail (coordinated layout so long refs never flip
+        // onto the same side and stack).
         const isH = this.state.viewport.orientation === "horizontal";
         if (isH) {
           const guessAbove = guess < truth;
@@ -829,8 +857,18 @@ export class CanonStrip {
             guessAbove ? "below" : "above"
           );
         } else {
-          this.drawGuessMarker(guess, w, h, true, "above");
-          this.drawTrueMarker(truth, w, h, "below");
+          const guessPt = this.railPoint(guess, w, h);
+          const truePt = this.railPoint(truth, w, h);
+          const pair = this.layoutPortraitResultPair(
+            guessPt,
+            truePt,
+            formatVerseLabel(guess),
+            formatVerseLabel(truth),
+            w,
+            h
+          );
+          this.drawGuessMarker(guess, w, h, true, "above", false, pair.you);
+          this.drawTrueMarker(truth, w, h, "below", pair.truth);
         }
       } else {
         // Perfect hit (or missing guess) — single true marker
@@ -860,6 +898,8 @@ export class CanonStrip {
         h
       );
     }
+
+    this.syncResultLinks();
   }
 
   /* ———— 1. Background ———— */
@@ -1241,7 +1281,8 @@ export class CanonStrip {
     h: number,
     withLabel: boolean,
     labelSide: "above" | "below" = "above",
-    lifted = false
+    lifted = false,
+    chipLayout?: ResultChipLayout
   ): void {
     const { ctx } = this;
     const p = this.railPoint(ch, w, h);
@@ -1264,13 +1305,14 @@ export class CanonStrip {
     if (withLabel) {
       if (result) {
         this.drawResultLabel(
-          formatVerseLabel(ch),
+          ch,
           "You",
           p,
           w,
           h,
           ACCENT_DEEP,
-          labelSide
+          labelSide,
+          chipLayout
         );
       } else {
         this.drawSelectionLabel(formatVerseLabel(ch), p, lifted);
@@ -1309,7 +1351,8 @@ export class CanonStrip {
     ch: number,
     w: number,
     h: number,
-    labelSide: "above" | "below" = "above"
+    labelSide: "above" | "below" = "above",
+    chipLayout?: ResultChipLayout
   ): void {
     const { ctx } = this;
     const p = this.railPoint(ch, w, h);
@@ -1331,13 +1374,14 @@ export class CanonStrip {
 
     if (k > 0.5) {
       this.drawResultLabel(
-        formatVerseLabel(ch),
+        ch,
         "True",
         p,
         w,
         h,
         SUCCESS_DEEP,
-        labelSide
+        labelSide,
+        chipLayout
       );
     }
   }
@@ -1379,27 +1423,16 @@ export class CanonStrip {
     ctx.restore();
   }
 
-  /**
-   * Result-page callout: role caption + verse ref.
-   * Portrait: YOU always left of the rail, TRUE always right (close misses
-   * stay legible). Landscape: above/below along the band.
-   */
-  private drawResultLabel(
-    verseLabel: string,
-    role: string,
-    p: Point,
-    w: number,
-    h: number,
-    ink: string,
-    side: "above" | "below" = "above"
-  ): void {
+  /** Natural size of a YOU/TRUE result chip (before side-fit shrink). */
+  private measureResultChip(verseLabel: string, role: string): {
+    bw: number;
+    bh: number;
+    ref: string;
+    roleText: string;
+  } {
     const { ctx } = this;
-    const free = this.freeAxis();
-    const isV = this.state.viewport.orientation === "vertical";
-    const isYou = role.toLowerCase() === "you";
     const ref = verseLabel.toUpperCase();
     const roleText = role.toUpperCase();
-
     ctx.save();
     ctx.font = `700 13px ${SERIF}`;
     setLetterSpacing(ctx, "0.3px");
@@ -1407,35 +1440,176 @@ export class CanonStrip {
     ctx.font = `600 9px ${SERIF}`;
     setLetterSpacing(ctx, "0.8px");
     const roleW = ctx.measureText(roleText).width;
+    setLetterSpacing(ctx, "0px");
+    ctx.restore();
+    const padX = 12;
+    const padY = 8;
+    const gap = 3;
+    const roleH = 11;
+    const refH = 16;
+    return {
+      bw: Math.max(refW, roleW) + padX * 2,
+      bh: padY * 2 + roleH + gap + refH,
+      ref,
+      roleText,
+    };
+  }
+
+  /**
+   * Portrait pair layout: YOU always left of the rail, TRUE always right.
+   * Long refs shrink into their half instead of flipping sides (which caused
+   * stacked/overlapping chips on close or mid-distance misses).
+   * When pin Ys are near enough that chips would still collide, push apart.
+   */
+  private layoutPortraitResultPair(
+    guessPt: Point,
+    truePt: Point,
+    guessLabel: string,
+    trueLabel: string,
+    w: number,
+    _h: number
+  ): { you: ResultChipLayout; truth: ResultChipLayout } {
+    const free = this.freeAxis();
+    const crossGap = this.railThick() / 2 + 12;
+    const youM = this.measureResultChip(guessLabel, "You");
+    const trueM = this.measureResultChip(trueLabel, "True");
+    const minChipW = 56;
+    const edge = 4;
+    const yGap = 8;
+
+    const placeBeside = (
+      pin: Point,
+      naturalW: number,
+      bh: number,
+      side: "left" | "right"
+    ): ResultChipLayout => {
+      // Prefer the pin's rail x so both chips bookend the same spine.
+      const railX = pin.x;
+      let bw: number;
+      let bx: number;
+      if (side === "left") {
+        const rightEdge = railX - crossGap;
+        const maxBw = Math.max(minChipW, rightEdge - edge);
+        bw = Math.min(naturalW, maxBw);
+        bx = rightEdge - bw;
+        if (bx < edge) {
+          bx = edge;
+          bw = Math.max(minChipW, Math.min(bw, rightEdge - edge));
+        }
+      } else {
+        const leftEdge = railX + crossGap;
+        const maxBw = Math.max(minChipW, w - edge - leftEdge);
+        bw = Math.min(naturalW, maxBw);
+        bx = leftEdge;
+        if (bx + bw > w - edge) {
+          bw = Math.max(minChipW, Math.min(bw, w - edge - leftEdge));
+          bx = Math.min(leftEdge, w - edge - bw);
+          // Never cross onto the left half of the rail.
+          if (bx < leftEdge) bx = leftEdge;
+        }
+      }
+      let by = pin.y - bh / 2;
+      by = Math.min(
+        free.origin + free.length - bh - 2,
+        Math.max(free.origin + 2, by)
+      );
+      return { bx, by, bw, bh };
+    };
+
+    const you = placeBeside(guessPt, youM.bw, youM.bh, "left");
+    const truth = placeBeside(truePt, trueM.bw, trueM.bh, "right");
+
+    // Vertical separation when chips still collide (near-miss pins).
+    const overlapY =
+      you.by < truth.by + truth.bh + yGap &&
+      truth.by < you.by + you.bh + yGap;
+    if (overlapY) {
+      const youCenter = you.by + you.bh / 2;
+      const trueCenter = truth.by + truth.bh / 2;
+      // Keep relative order of pins; if equal, YOU above TRUE.
+      const youFirst =
+        guessPt.y < truePt.y - 0.5 ||
+        (Math.abs(guessPt.y - truePt.y) <= 0.5 && youCenter <= trueCenter);
+      const top = youFirst ? you : truth;
+      const bot = youFirst ? truth : you;
+      const needed = top.by + top.bh + yGap;
+      if (bot.by < needed) {
+        const push = needed - bot.by;
+        bot.by += push;
+        const maxBy = free.origin + free.length - bot.bh - 2;
+        if (bot.by > maxBy) {
+          const overflow = bot.by - maxBy;
+          bot.by = maxBy;
+          top.by = Math.max(free.origin + 2, top.by - overflow);
+        }
+      }
+    }
+
+    return { you, truth };
+  }
+
+  /**
+   * Result-page callout: role caption + verse ref.
+   * Portrait: YOU left / TRUE right via coordinated layout (see
+   * layoutPortraitResultPair). Landscape: above/below along the band.
+   * Registers a hit box so the chip is a real route.bible link overlay.
+   */
+  private drawResultLabel(
+    verseIndex: number,
+    role: string,
+    p: Point,
+    w: number,
+    h: number,
+    ink: string,
+    side: "above" | "below" = "above",
+    chipLayout?: ResultChipLayout
+  ): void {
+    const { ctx } = this;
+    const free = this.freeAxis();
+    const isV = this.state.viewport.orientation === "vertical";
+    const isYou = role.toLowerCase() === "you";
+    const verseLabel = formatVerseLabel(verseIndex);
+    const metrics = this.measureResultChip(verseLabel, role);
+    const { ref, roleText } = metrics;
 
     const padX = 12;
     const padY = 8;
     const gap = 3;
     const roleH = 11;
     const refH = 16;
-    const bw = Math.max(refW, roleW) + padX * 2;
-    const bh = padY * 2 + roleH + gap + refH;
     const stem = 14;
     const crossGap = this.railThick() / 2 + 12;
 
     let bx: number;
     let by: number;
+    let bw = metrics.bw;
+    const bh = metrics.bh;
 
-    if (isV) {
-      // Portrait: sit beside the rail so near-miss pins don't merge labels
+    if (chipLayout) {
+      bx = chipLayout.bx;
+      by = chipLayout.by;
+      bw = chipLayout.bw;
+    } else if (isV) {
+      // Solo portrait label (perfect hit / single marker): prefer role side.
       by = p.y - bh / 2;
       by = Math.min(
         free.origin + free.length - bh - 2,
         Math.max(free.origin + 2, by)
       );
+      const minChipW = 56;
+      const edge = 4;
       if (isYou) {
-        bx = p.x - crossGap - bw;
-        if (bx < 4) bx = p.x + crossGap;
+        const rightEdge = p.x - crossGap;
+        const maxBw = Math.max(minChipW, rightEdge - edge);
+        bw = Math.min(bw, maxBw);
+        bx = Math.max(edge, rightEdge - bw);
       } else {
-        bx = p.x + crossGap;
-        if (bx + bw > w - 4) bx = p.x - crossGap - bw;
+        const leftEdge = p.x + crossGap;
+        const maxBw = Math.max(minChipW, w - edge - leftEdge);
+        bw = Math.min(bw, maxBw);
+        bx = leftEdge;
+        if (bx + bw > w - edge) bx = Math.max(leftEdge, w - edge - bw);
       }
-      bx = Math.min(Math.max(4, bx), w - bw - 4);
     } else {
       bx = p.x - bw / 2;
       by = side === "above" ? p.y - bh - stem : p.y + stem;
@@ -1446,6 +1620,8 @@ export class CanonStrip {
       bx = Math.min(maxX, Math.max(minX, bx));
       bx = Math.min(Math.max(4, bx), w - bw - 4);
     }
+
+    ctx.save();
 
     // Transparent chip + strong border (page bg shows through)
     ctx.fillStyle = BG;
@@ -1480,20 +1656,89 @@ export class CanonStrip {
     ctx.stroke();
 
     const cx = bx + bw / 2;
+    const textMax = Math.max(24, bw - padX * 2);
+    const refY = by + padY + roleH + gap + refH / 2 + 0.5;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillStyle = ink;
     ctx.font = `600 9px ${SERIF}`;
     setLetterSpacing(ctx, "0.9px");
     ctx.globalAlpha = 0.85;
-    ctx.fillText(roleText, cx, by + padY + roleH / 2);
+    ctx.fillText(roleText, cx, by + padY + roleH / 2, textMax);
     ctx.globalAlpha = 1;
     ctx.font = `700 13px ${SERIF}`;
     setLetterSpacing(ctx, "0.25px");
-    ctx.fillText(ref, cx, by + padY + roleH + gap + refH / 2 + 0.5);
+    ctx.fillText(ref, cx, refY, textMax);
+    // Subtle underline so the chip reads as a tappable link
+    const underlineW = Math.min(textMax, ctx.measureText(ref).width);
+    ctx.strokeStyle = ink;
+    ctx.globalAlpha = 0.45;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - underlineW / 2, refY + refH / 2 - 1);
+    ctx.lineTo(cx + underlineW / 2, refY + refH / 2 - 1);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
 
     setLetterSpacing(ctx, "0px");
     ctx.restore();
+
+    this.resultLinkHits.push({
+      verseIndex,
+      bx,
+      by,
+      bw,
+      bh,
+      role,
+    });
+  }
+
+  private clearResultLinks(): void {
+    this.resultLinkHits = [];
+    if (this.linkLayer) this.linkLayer.replaceChildren();
+  }
+
+  /**
+   * Transparent DOM anchors over YOU/TRUE chips → route.bible.
+   * Real links so long-press / open-in-new-tab / a11y all work.
+   */
+  private syncResultLinks(): void {
+    const parent = this.canvas.parentElement;
+    if (!parent) return;
+
+    if (!this.linkLayer) {
+      this.linkLayer = document.createElement("div");
+      this.linkLayer.className = "result-link-layer";
+      parent.appendChild(this.linkLayer);
+    }
+
+    this.linkLayer.replaceChildren();
+    if (!this.state.revealed || this.resultLinkHits.length === 0) return;
+
+    for (const hit of this.resultLinkHits) {
+      const href = routeBibleUrl(hit.verseIndex);
+      if (!href) continue;
+      const label = formatVerseLabel(hit.verseIndex);
+      const a = document.createElement("a");
+      a.className = "result-ref-link";
+      a.href = href;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.title = `Open ${label} on route.bible`;
+      a.setAttribute(
+        "aria-label",
+        `${hit.role}: ${label}. Open on route.bible`
+      );
+      a.style.left = `${hit.bx}px`;
+      a.style.top = `${hit.by}px`;
+      a.style.width = `${hit.bw}px`;
+      a.style.height = `${hit.bh}px`;
+      // Keep canvas from starting a pan when the chip is pressed.
+      a.addEventListener("pointerdown", (e) => {
+        e.stopPropagation();
+      });
+      this.linkLayer.appendChild(a);
+    }
   }
 
   private edgeLabel(verseIndex: number): string {

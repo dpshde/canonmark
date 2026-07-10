@@ -305,6 +305,120 @@ function loadBsb(bsbPath) {
   return map;
 }
 
+/** OSIS → book key in BibleTranslations/KJV/KJV_bible.json */
+const OSIS_TO_KJV_BOOK = {
+  GEN: "Genesis",
+  EXO: "Exodus",
+  LEV: "Leviticus",
+  NUM: "Numbers",
+  DEU: "Deuteronomy",
+  JOS: "Joshua",
+  JDG: "Judges",
+  RUT: "Ruth",
+  "1SA": "1 Samuel",
+  "2SA": "2 Samuel",
+  "1KI": "1 Kings",
+  "2KI": "2 Kings",
+  "1CH": "1 Chronicles",
+  "2CH": "2 Chronicles",
+  EZR: "Ezra",
+  NEH: "Nehemiah",
+  EST: "Esther",
+  JOB: "Job",
+  PSA: "Psalm",
+  PRO: "Proverbs",
+  ECC: "Ecclesiastes",
+  SNG: "Song Of Solomon",
+  ISA: "Isaiah",
+  JER: "Jeremiah",
+  LAM: "Lamentations",
+  EZK: "Ezekiel",
+  DAN: "Daniel",
+  HOS: "Hosea",
+  JOL: "Joel",
+  AMO: "Amos",
+  OBA: "Obadiah",
+  JON: "Jonah",
+  MIC: "Micah",
+  NAM: "Nahum",
+  HAB: "Habakkuk",
+  ZEP: "Zephaniah",
+  HAG: "Haggai",
+  ZEC: "Zechariah",
+  MAL: "Malachi",
+  MAT: "Matthew",
+  MRK: "Mark",
+  LUK: "Luke",
+  JHN: "John",
+  ACT: "Acts",
+  ROM: "Romans",
+  "1CO": "1 Corinthians",
+  "2CO": "2 Corinthians",
+  GAL: "Galatians",
+  EPH: "Ephesians",
+  PHP: "Philippians",
+  COL: "Colossians",
+  "1TH": "1 Thessalonians",
+  "2TH": "2 Thessalonians",
+  "1TI": "1 Timothy",
+  "2TI": "2 Timothy",
+  TIT: "Titus",
+  PHM: "Philemon",
+  HEB: "Hebrews",
+  JAS: "James",
+  "1PE": "1 Peter",
+  "2PE": "2 Peter",
+  "1JN": "1 John",
+  "2JN": "2 John",
+  "3JN": "3 John",
+  JUD: "Jude",
+  REV: "Revelation",
+};
+
+/** Nested { Book: { chapter: { verse: text } } } → OSIS map. */
+function loadKjv(kjvPath) {
+  const raw = JSON.parse(fs.readFileSync(kjvPath, "utf8"));
+  const map = new Map();
+  for (const [osis, bookName] of Object.entries(OSIS_TO_KJV_BOOK)) {
+    const book = raw[bookName];
+    if (!book) continue;
+    for (const [ch, verses] of Object.entries(book)) {
+      for (const [v, text] of Object.entries(verses)) {
+        map.set(`${osis}.${Number(ch)}.${Number(v)}`, text);
+      }
+    }
+  }
+  return map;
+}
+
+/** Mirror BSB verse/paragraph keys with KJV strings (same structure). */
+function buildKjvTexts(bsbVerses, bsbParagraphs, kjv) {
+  const verses = {};
+  const missing = [];
+  for (const key of Object.keys(bsbVerses)) {
+    if (kjv.has(key)) verses[key] = kjv.get(key);
+    else missing.push(key);
+  }
+  const paragraphs = {};
+  for (const [anchor, para] of Object.entries(bsbParagraphs)) {
+    const [book, ch] = anchor.split(".");
+    paragraphs[anchor] = {
+      start: para.start,
+      end: para.end,
+      verses: (para.verses || []).map(({ v, t }) => {
+        const key = `${book}.${ch}.${v}`;
+        return { v, t: kjv.get(key) ?? verses[key] ?? t };
+      }),
+    };
+  }
+  if (missing.length) {
+    throw new Error(
+      `KJV missing ${missing.length} pool verses (e.g. ${missing.slice(0, 5).join(", ")})`
+    );
+  }
+  return { verses, paragraphs };
+}
+
 function loadPara(paraPath) {
   return JSON.parse(fs.readFileSync(paraPath, "utf8"));
 }
@@ -754,6 +868,10 @@ function main() {
     path.join(root, "..", "selah-tools/apps/exedra-search/data/bsb.browser.jsonl"),
     path.join(root, "data-src/bsb.browser.jsonl"),
   ]);
+  const kjvPath = resolvePath([
+    path.join(root, "..", "BibleTranslations/KJV/KJV_bible.json"),
+    path.join(root, "data-src/KJV_bible.json"),
+  ]);
   const paraPath = resolvePath([
     path.join(root, "..", "grab-bcv/src/para-data.json"),
     path.join(root, "data-src/para-data.json"),
@@ -766,6 +884,7 @@ function main() {
 
   console.log("rankings:", rankingsPath);
   console.log("bsb (Berean Standard Bible):", bsbPath);
+  console.log("kjv:", kjvPath ?? "(missing — KJV bundle skipped)");
   console.log("para:", paraPath);
 
   fs.mkdirSync(outDir, { recursive: true });
@@ -806,6 +925,22 @@ function main() {
     path.join(outDir, "paragraphs.json"),
     JSON.stringify(paragraphs)
   );
+
+  if (kjvPath) {
+    const kjv = loadKjv(kjvPath);
+    const kjvTexts = buildKjvTexts(verses, paragraphs, kjv);
+    fs.writeFileSync(
+      path.join(outDir, "verses-kjv.json"),
+      JSON.stringify(kjvTexts.verses)
+    );
+    fs.writeFileSync(
+      path.join(outDir, "paragraphs-kjv.json"),
+      JSON.stringify(kjvTexts.paragraphs)
+    );
+    console.log(
+      `KJV: wrote ${Object.keys(kjvTexts.verses).length} verses, ${Object.keys(kjvTexts.paragraphs).length} paragraphs`
+    );
+  }
 
   // Also embed small copies importable by tests / tree-shaken modules
   fs.writeFileSync(

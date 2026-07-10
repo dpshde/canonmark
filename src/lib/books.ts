@@ -164,6 +164,17 @@ export function formatVerseLabel(verseIndex: number): string {
   return `${loc.book.name} ${loc.chapter}:${loc.verse}`;
 }
 
+/**
+ * Canonical launcher URL for a verse on route.bible
+ * (e.g. https://www.route.bible/jhn.3.16).
+ */
+export function routeBibleUrl(verseIndex: number): string | null {
+  const loc = bookChapterVerseFromIndex(verseIndex);
+  if (!loc) return null;
+  const osis = loc.book.osis.toLowerCase();
+  return `https://www.route.bible/${osis}.${loc.chapter}.${loc.verse}`;
+}
+
 /** @deprecated Use formatVerseLabel. */
 export function formatChapterLabel(index: number): string {
   return formatVerseLabel(index);
