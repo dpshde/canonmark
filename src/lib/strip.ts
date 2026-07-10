@@ -533,11 +533,10 @@ export class CanonStrip {
     this.ctx.imageSmoothingQuality = "high";
 
     this.drawBackground(w, h);
-    if (resultView) {
-      // Quiet rail only — no genre tints, book names, or edge chrome
-      this.drawPlainRail(w, h);
-    } else {
-      this.drawBookSegments(w, h);
+    // Always keep genre-tinted segments — they orient you on the close-up
+    this.drawBookSegments(w, h);
+    if (!resultView) {
+      // Result view: no book names / edge chrome (markers carry the labels)
       this.drawSeam(w, h);
       this.drawBookLabels(w, h);
       this.drawEdgeLabels(w, h);
@@ -562,21 +561,6 @@ export class CanonStrip {
       }
     } else if (this.state.provisionalGuess != null) {
       this.drawGuessMarker(this.state.provisionalGuess, w, h, true, "above");
-    }
-  }
-
-  /** Single unsegmented rail for the result close-up (free band only). */
-  private drawPlainRail(w: number, h: number): void {
-    const { ctx } = this;
-    const isH = this.state.viewport.orientation === "horizontal";
-    const thick = this.railThick();
-    const cross = this.railCross(w, h);
-    const free = this.freeAxis();
-    ctx.fillStyle = RAIL;
-    if (isH) {
-      ctx.fillRect(free.origin, cross - thick / 2, free.length, thick);
-    } else {
-      ctx.fillRect(cross - thick / 2, free.origin, thick, free.length);
     }
   }
 

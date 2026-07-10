@@ -7,8 +7,6 @@ import {
   takeHint,
   confirmGuess,
   shareForRound,
-  formatTrueLocation,
-  formatRef,
   hintQuadrantLabel,
   currentAppState,
   type RoundData,
@@ -194,12 +192,16 @@ function renderPlay(): void {
     round.mode === "daily" && round.puzzleNumber != null
       ? `Daily #${round.puzzleNumber}`
       : "Practice";
-  /* Map zooms sit with nav chrome, not with Confirm */
-  top.append(
-    back,
-    makeZoomBar(),
-    el("span", { class: "mode-label", text: modeLabel })
-  );
+  /* Map zooms sit with nav chrome while placing — hide on result to reduce noise */
+  if (round.phase === "playing") {
+    top.append(
+      back,
+      makeZoomBar(),
+      el("span", { class: "mode-label", text: modeLabel })
+    );
+  } else {
+    top.append(back, el("span", { class: "mode-label", text: modeLabel }));
+  }
   hud.append(top);
 
   /* Verse band — same horizontal measure as the dock */
@@ -275,70 +277,7 @@ function renderPlay(): void {
   }
 
   if (round.phase === "revealed" && round.result) {
-    const r = round.result;
-    const panel = el("div", { class: "result-panel", id: "result-card" });
-    panel.append(
-      el("p", { class: "score-line", id: "score-total" }, [
-        document.createTextNode(String(r.total)),
-        el("span", { class: "pts-unit", text: "pts" }),
-      ]),
-      el("p", {
-        class: "score-meta",
-        text: `Off by ${r.distance} v · ×${r.multiplier} · ${r.distancePts} base`,
-      }),
-      el("p", { class: "true-loc" }, [
-        el("span", {
-          class: "true-ref",
-          id: "true-ref",
-          text: `${formatTrueLocation(round)} · ${formatRef(round.poolItem)}`,
-        }),
-      ])
-    );
-
-    const shareTextBody = shareForRound(round);
-    if (shareTextBody) {
-      const shareBtn = el("button", {
-        class:
-          round.mode === "daily"
-            ? "btn-primary btn-full"
-            : "btn-secondary btn-full",
-        type: "button",
-        id: "btn-share",
-        text: "Share result",
-      });
-      shareBtn.addEventListener("click", async () => {
-        try {
-          const how = await shareText(shareTextBody);
-          shareBtn.textContent = how === "shared" ? "Shared" : "Copied";
-          window.setTimeout(() => {
-            shareBtn.textContent = "Share result";
-          }, 1600);
-        } catch (err) {
-          if (err instanceof DOMException && err.name === "AbortError") return;
-          // Last resort: show the text for manual copy
-          let box = document.querySelector("#share-box") as HTMLElement | null;
-          if (!box) {
-            box = el("div", { class: "share-box", id: "share-box" });
-            box.textContent = shareTextBody;
-            panel.insertBefore(box, shareBtn);
-          }
-          shareBtn.textContent = "Select text above";
-        }
-      });
-      panel.append(shareBtn);
-    }
-
-    if (round.mode === "endless") {
-      const again = el("button", {
-        class: "btn-primary btn-full",
-        type: "button",
-        id: "btn-again",
-        text: "Next",
-      });
-      again.addEventListener("click", () => startMode("endless"));
-      panel.append(again);
-    }
-    dock.append(panel);
+    dock.append(makeResultPanel(round));
   }
 
   hud.append(dock);
@@ -496,6 +435,82 @@ function syncGuessInputFromMarker(): void {
   input.value = formatVerseLabel(provisionalGuess);
   wrap.classList.add("is-valid");
   wrap.classList.remove("is-invalid");
+}
+
+/**
+ * Result dock — score is the hero; timeline already carries guess/true labels.
+ * One meta line, one action row. No repeated refs, no base-point jargon.
+ */
+function makeResultPanel(round: RoundData): HTMLElement {
+  const r = round.result!;
+  const panel = el("div", { class: "result-panel", id: "result-card" });
+
+  const distLabel =
+    r.distance === 0
+      ? "Exact"
+      : r.distance === 1
+        ? "1 verse off"
+        : `${r.distance} verses off`;
+
+  panel.append(
+    el("p", { class: "score-line", id: "score-total" }, [
+      document.createTextNode(String(r.total)),
+      el("span", { class: "pts-unit", text: "pts" }),
+    ]),
+    el("p", {
+      class: "score-meta",
+      id: "true-ref",
+      text: `${distLabel} · ×${r.multiplier}`,
+    })
+  );
+
+  const actions = el("div", { class: "result-actions" });
+  const shareTextBody = shareForRound(round);
+  if (shareTextBody) {
+    const shareBtn = el("button", {
+      class:
+        round.mode === "daily" ? "btn-primary" : "btn-secondary",
+      type: "button",
+      id: "btn-share",
+      text: "Share",
+    });
+    shareBtn.addEventListener("click", async () => {
+      try {
+        const how = await shareText(shareTextBody);
+        shareBtn.textContent = how === "shared" ? "Shared" : "Copied";
+        window.setTimeout(() => {
+          shareBtn.textContent = "Share";
+        }, 1600);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        let box = document.querySelector("#share-box") as HTMLElement | null;
+        if (!box) {
+          box = el("div", { class: "share-box", id: "share-box" });
+          box.textContent = shareTextBody;
+          panel.insertBefore(box, actions);
+        }
+        shareBtn.textContent = "Select text above";
+      }
+    });
+    actions.append(shareBtn);
+  }
+
+  if (round.mode === "endless") {
+    const again = el("button", {
+      class: "btn-primary",
+      type: "button",
+      id: "btn-again",
+      text: "Next",
+    });
+    again.addEventListener("click", () => startMode("endless"));
+    actions.append(again);
+  }
+
+  if (actions.childNodes.length === 1) {
+    actions.classList.add("result-actions--solo");
+  }
+  if (actions.childNodes.length) panel.append(actions);
+  return panel;
 }
 
 /** Surrounding paragraph + testament-half hints — rendered below the rail. */

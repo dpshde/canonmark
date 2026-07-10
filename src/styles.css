@@ -523,27 +523,27 @@ button:disabled {
   width: 100%;
 }
 
-/* Result — flat, in the dock band */
+/* Result — score + one meta line + action row; refs live on the rail */
 .result-panel {
   text-align: center;
   animation: fadeRise var(--dur-mid) var(--ease-out) both;
-  padding: var(--space-xs) 0 0;
+  padding: var(--space-sm) 0 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-sm);
+  gap: var(--space-xs);
 }
 
 .result-panel .score-line {
   margin: 0;
-  font-size: 1.8rem;
+  font-size: 1.65rem;
   font-weight: 700;
   color: var(--ink);
   letter-spacing: -0.01em;
-  line-height: 1.15;
+  line-height: 1.1;
 }
 
 .result-panel .score-line .pts-unit {
-  font-size: 0.5em;
+  font-size: 0.48em;
   font-weight: 400;
   color: var(--ink-3);
   letter-spacing: 0.03em;
@@ -556,18 +556,21 @@ button:disabled {
   color: var(--ink-3);
 }
 
-.result-panel .true-loc {
-  margin: var(--space-xs) 0 0;
-  font-size: 0.96rem;
-  color: var(--ink);
-}
-
-.result-panel .true-ref {
-  font-weight: 600;
-}
-
-.result-panel .btn-full {
+.result-actions {
+  display: flex;
+  gap: var(--space-sm);
   margin-top: var(--space-sm);
+  align-items: stretch;
+}
+
+.result-actions .btn-primary,
+.result-actions .btn-secondary {
+  flex: 1 1 0;
+}
+
+.result-actions--solo .btn-primary,
+.result-actions--solo .btn-secondary {
+  flex: 1 1 auto;
 }
 
 .share-box {
