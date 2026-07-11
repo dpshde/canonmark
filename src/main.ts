@@ -53,6 +53,7 @@ import {
   unlockedCount,
   achievementDefForId,
   dropCapPath,
+  dropCapPathsToPreload,
   type AchievementMetal,
 } from "./lib/achievements";
 
@@ -103,7 +104,7 @@ function bindDropCapSrc(
   preferred: AchievementMetal
 ): void {
   const m = dropCap.match(
-    /^(?:\.\/)?assets\/achievements\/(.+)-(bronze|gold|snow)\.jpg$/
+    /^(?:\.\/)?assets\/achievements\/(.+)-(bronze|gold|snow)\.webp$/
   );
   const motif = m?.[1];
   const order: AchievementMetal[] = [
@@ -123,6 +124,45 @@ function bindDropCapSrc(
     if (motif && i < order.length) apply();
   };
   apply();
+}
+
+/** Drop-cap URLs already kicked off so re-visits home don't re-fetch. */
+const warmedDropCapUrls = new Set<string>();
+
+/**
+ * Warm achievement drop-cap images in the background while the player is
+ * on home, so the achievements screen paints art from cache.
+ */
+function scheduleAchievementDropCapPreload(
+  state: Parameters<typeof dropCapPathsToPreload>[0]
+): void {
+  const base = import.meta.env.BASE_URL || "./";
+  const pending: string[] = [];
+  for (const path of dropCapPathsToPreload(state)) {
+    const url = assetUrl(base, path);
+    if (warmedDropCapUrls.has(url)) continue;
+    warmedDropCapUrls.add(url);
+    pending.push(url);
+  }
+  if (!pending.length) return;
+
+  const warm = () => {
+    for (const url of pending) {
+      const img = new Image();
+      img.decoding = "async";
+      if ("fetchPriority" in img) {
+        (img as HTMLImageElement & { fetchPriority: string }).fetchPriority =
+          "low";
+      }
+      img.src = url;
+    }
+  };
+
+  if (typeof requestIdleCallback === "function") {
+    requestIdleCallback(warm, { timeout: 1500 });
+  } else {
+    setTimeout(warm, 200);
+  }
 }
 
 async function loadData(): Promise<void> {
@@ -584,6 +624,10 @@ function renderHome(): void {
 
   screen.append(panel, footer);
   app.append(screen);
+
+  // Cache drop-cap art while home is idle so the crown opens without
+  // a cascade of image fetches.
+  scheduleAchievementDropCapPreload(state);
 }
 
 function startMode(mode: "daily" | "endless", puzzleNumber?: number): void {

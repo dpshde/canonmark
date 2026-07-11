@@ -8,6 +8,7 @@ import {
   achievementDefForId,
   metalForThreshold,
   dropCapPath,
+  dropCapPathsToPreload,
   ACHIEVEMENT_CATALOG,
 } from "../src/lib/achievements";
 import {
@@ -98,13 +99,13 @@ describe("metal tiers", () => {
 
   it("drop caps are per-achievement motif + metal paths", () => {
     expect(dropCapPath("exact-once", "bronze")).toBe(
-      "assets/achievements/exact-once-bronze.jpg"
+      "assets/achievements/exact-once-bronze.webp"
     );
     expect(dropCapPath("exact-10", "bronze")).toBe(
-      "assets/achievements/exact-10-bronze.jpg"
+      "assets/achievements/exact-10-bronze.webp"
     );
     expect(dropCapPath("rounds-5000", "snow")).toBe(
-      "assets/achievements/rounds-5000-snow.jpg"
+      "assets/achievements/rounds-5000-snow.webp"
     );
   });
 
@@ -122,6 +123,30 @@ describe("metal tiers", () => {
     expect(byId["rounds-10"]).toContain("rounds-10-bronze");
     expect(byId["rounds-5000"]).toContain("rounds-5000-snow");
     expect(byId["daily-365"]).toContain("daily-365-snow");
+  });
+
+  it("preload paths cover the seed catalog and listed rows", () => {
+    const state = {
+      lastDaily: null,
+      history: [],
+      streak: 0,
+      bestStreak: 0,
+      practiceRounds: 0,
+      practiceLog: [],
+      lifetime: emptyLifetime(),
+      achievementUnlocks: {},
+      achievementsSeenAt: null,
+      installDismissedAt: null,
+    } satisfies AppState;
+    const paths = dropCapPathsToPreload(state);
+    expect(paths.length).toBeGreaterThanOrEqual(ACHIEVEMENT_CATALOG.length);
+    expect(new Set(paths).size).toBe(paths.length);
+    for (const def of ACHIEVEMENT_CATALOG) {
+      expect(paths).toContain(def.dropCap);
+    }
+    for (const p of paths) {
+      expect(p).toMatch(/^assets\/achievements\/.+\.webp$/);
+    }
   });
 });
 

@@ -40,13 +40,13 @@ export function metalForThreshold(n: number): AchievementMetal {
  * Illuminated drop-cap path for one achievement motif + metal colorway.
  * Motif is the seed achievement id — each seed has unique art catered to
  * that unlock (letter + ornaments). Open-ended rungs inherit the highest
- * seed’s motif. File: `{seedId}-{bronze|gold|snow}.jpg`.
+ * seed’s motif. File: `{seedId}-{bronze|gold|snow}.webp`.
  */
 export function dropCapPath(
   motifId: string,
   metal: AchievementMetal
 ): string {
-  return `assets/achievements/${motifId}-${metal}.jpg`;
+  return `assets/achievements/${motifId}-${metal}.webp`;
 }
 
 export interface AchievementDef {
@@ -697,6 +697,21 @@ export function listAchievements(state: AppState): AchievementView[] {
     if (pb !== pa) return pb - pa;
     return (a.threshold ?? 0) - (b.threshold ?? 0);
   });
+}
+
+/**
+ * Unique drop-cap asset paths worth warming in the background.
+ * Seed catalog + currently listed rows (open-ended rungs included).
+ */
+export function dropCapPathsToPreload(state: AppState): string[] {
+  const paths = new Set<string>();
+  for (const def of ACHIEVEMENT_CATALOG) {
+    paths.add(def.dropCap);
+  }
+  for (const a of listAchievements(state)) {
+    paths.add(a.dropCap);
+  }
+  return [...paths];
 }
 
 export function unlockedCount(state: AppState): {
