@@ -464,16 +464,19 @@ button:disabled {
 .timeline-cue {
   position: absolute;
   top: 50%;
-  left: 50%;
-  width: 8.5rem;
+  /* Portrait: rail + labels hug left; cue lives in the open right field */
+  left: 52%;
+  right: 2.75rem;
+  width: auto;
+  max-width: 11rem;
   margin: 0;
-  /* Portrait: sit to the right of the rail (book names own the left) */
-  transform: translate(28px, -50%);
+  transform: translateY(-50%);
   color: var(--ink-2);
   font-size: 0.82rem;
   line-height: 1.35;
   text-align: left;
   text-wrap: pretty;
+  pointer-events: none;
   transition:
     opacity var(--dur-mid) var(--ease-out),
     transform var(--dur-fast) var(--ease-out);
@@ -486,7 +489,7 @@ button:disabled {
 .timeline-cue.is-hidden {
   opacity: 0;
   visibility: hidden;
-  transform: translate(20px, -50%);
+  transform: translateY(calc(-50% + 4px));
 }
 
 

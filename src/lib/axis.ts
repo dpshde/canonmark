@@ -152,6 +152,61 @@ export function bookSegments(): BookSegment[] {
   }));
 }
 
+/**
+ * Choose book-start landmarks for the overview rail.
+ * Portrait uses a lower size floor and a minimum axis gap so phones get
+ * denser anchors without stacked labels. Larger books win collisions.
+ */
+export function selectBookAnchors(
+  segments: BookSegment[],
+  options: {
+    orientation: Orientation;
+    span: number;
+    axisPx: number;
+    center: number;
+    rangeStart: number;
+    rangeEnd: number;
+  }
+): Array<BookSegment & { lenPx: number }> {
+  const { orientation, span, axisPx, center, rangeStart, rangeEnd } = options;
+  const isH = orientation === "horizontal";
+  const minPx = isH ? 20 : 4;
+  /** Portrait: tight but readable spacing for phone overview landmarks. */
+  const minGap = isH ? 0 : 13;
+  const safeSpan = Math.max(1, span);
+  const safeAxis = Math.max(1, axisPx);
+  const half = safeSpan / 2;
+
+  const candidates: Array<BookSegment & { lenPx: number; axisPos: number }> = [];
+  for (const seg of segments) {
+    if (seg.startVerseIndex < rangeStart || seg.startVerseIndex > rangeEnd) {
+      continue;
+    }
+    const verses = seg.endVerseIndex - seg.startVerseIndex + 1;
+    const lenPx = (verses / safeSpan) * safeAxis;
+    if (lenPx < minPx) continue;
+    const axisPos =
+      ((seg.startVerseIndex - (center - half)) / safeSpan) * safeAxis;
+    candidates.push({ ...seg, lenPx, axisPos });
+  }
+
+  // Prefer longer books when two starts would collide.
+  candidates.sort((a, b) => b.lenPx - a.lenPx || a.startVerseIndex - b.startVerseIndex);
+  const accepted: Array<BookSegment & { lenPx: number; axisPos: number }> = [];
+  for (const candidate of candidates) {
+    if (
+      minGap > 0 &&
+      accepted.some((p) => Math.abs(p.axisPos - candidate.axisPos) < minGap)
+    ) {
+      continue;
+    }
+    accepted.push(candidate);
+  }
+
+  accepted.sort((a, b) => a.startVerseIndex - b.startVerseIndex);
+  return accepted.map(({ axisPos: _axisPos, ...rest }) => rest);
+}
+
 export function testamentSeamT(): number {
   return verseToT(TESTAMENT_SEAM_AFTER);
 }
@@ -339,4 +394,51 @@ export function viewportForPrecision(
     pad: 1,
     minSpan: 150,
   });
+}
+
+/** Left padding (px) before the portrait rail so notches/labels own the right. */
+export const PORTRAIT_RAIL_INSET = 14;
+
+/** Hit width (px) for the mobile full-canon quick-scroll track. */
+export const QUICK_SCROLL_HIT = 28;
+
+/**
+ * Cross-axis (x) center of the vertical rail: hug the left of the free band
+ * so book/chapter/selection labels and notches all sit to the right.
+ */
+export function portraitRailCross(
+  width: number,
+  startInset: number,
+  endInset: number,
+  railThick: number
+): number {
+  const free = Math.max(48, width - startInset - endInset);
+  const thick = Math.max(1, railThick);
+  const maxCross = startInset + free - thick / 2 - 4;
+  const hugged = startInset + PORTRAIT_RAIL_INSET + thick / 2;
+  return Math.min(maxCross, Math.max(startInset + thick / 2, hugged));
+}
+
+/** Whether a portrait pointer x falls in the right-edge quick-scroll zone. */
+export function isQuickScrollHit(
+  x: number,
+  width: number,
+  hitWidth: number = QUICK_SCROLL_HIT
+): boolean {
+  const zone = Math.max(12, Math.min(hitWidth, width * 0.2));
+  return x >= width - zone;
+}
+
+/**
+ * Map a free-band axis coordinate to a verse on the full canon
+ * (Genesis at origin, Revelation at origin + length).
+ */
+export function quickScrollVerse(
+  axisPos: number,
+  freeOrigin: number,
+  freeLength: number
+): number {
+  const length = Math.max(1, freeLength);
+  const t = (axisPos - freeOrigin) / length;
+  return tToVerse(t);
 }
