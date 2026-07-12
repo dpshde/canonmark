@@ -270,10 +270,10 @@ describe("evaluateAchievements", () => {
     expect(achievementDefForId("rounds-10000")?.threshold).toBe(10_000);
   });
 
-  it("clean sheet requires four exact daily rounds", () => {
-    const fourExact = [1, 2, 3, 4].map((i) => practice(0, 1, i, i));
+  it("clean sheet requires every daily round exact", () => {
+    const threeExact = [1, 2, 3].map((i) => practice(0, 1, i, i));
     const s = state({
-      history: [completeDaily(1, fourExact)],
+      history: [completeDaily(1, threeExact)],
       practiceRounds: 0,
     });
     const u = evaluateAchievements(s);

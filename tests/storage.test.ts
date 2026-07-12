@@ -56,7 +56,7 @@ function partial(n: number, dateKey: string, rounds: number): DailyResultRecord 
 }
 
 function complete(n: number, dateKey: string, at: string): DailyResultRecord {
-  const rec = partial(n, dateKey, 4);
+  const rec = partial(n, dateKey, 3);
   return { ...rec, completedAt: at };
 }
 
@@ -81,7 +81,7 @@ describe("daily progress storage", () => {
       now
     );
     expect(done.history).toHaveLength(1);
-    expect(done.history[0].rounds).toHaveLength(4);
+    expect(done.history[0].rounds).toHaveLength(3);
     expect(done.streak).toBe(1);
     expect(isDailyComplete(done.lastDaily!)).toBe(true);
   });

@@ -3,6 +3,7 @@
  */
 import type { PoolItem } from "./daily";
 import {
+  DAILY_VERSE_COUNT,
   selectPoolItemsForPuzzle,
   selectEndlessItem,
   todayPuzzleNumber,
@@ -361,7 +362,7 @@ export function confirmGuess(
     const nextLife = bumpLifetimeForRound(appState, flags);
     if (complete) {
       nextLife.completedDailies += 1;
-      if (rounds.length >= 4) {
+      if (rounds.length >= DAILY_VERSE_COUNT) {
         if (rounds.every((r) => effectiveDistance(r) === 0)) {
           nextLife.cleanSheets += 1;
         }

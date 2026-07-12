@@ -34,12 +34,12 @@ describe("puzzle numbering", () => {
 });
 
 describe("selectPoolItemForPuzzle", () => {
-  it("builds the same four unique verses for every player", () => {
+  it("builds the same three unique verses for every player", () => {
     const a = selectPoolItemsForPuzzle(42, pool);
     const b = selectPoolItemsForPuzzle(42, pool);
     expect(a).toEqual(b);
-    expect(a).toHaveLength(4);
-    expect(new Set(a.map((item) => item.ref)).size).toBe(4);
+    expect(a).toHaveLength(3);
+    expect(new Set(a.map((item) => item.ref)).size).toBe(3);
   });
   it("same N always yields same ref", () => {
     const a = selectPoolItemForPuzzle(1, pool);

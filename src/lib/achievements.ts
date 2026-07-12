@@ -8,6 +8,7 @@
  * lifetime counters (never trimmed by LOG_CAP). Logs only backfill.
  */
 import { bookChapterVerseFromIndex } from "./books";
+import { DAILY_VERSE_COUNT } from "./daily";
 import { CLOSE_DISTANCE } from "./scoring";
 import { effectiveDistance, collectScoredRounds } from "./mastery";
 import {
@@ -498,7 +499,7 @@ export function recomputeLifetimeFromLogs(state: AppState): LifetimeCounters {
     if (!isDailyComplete(daily)) continue;
     L.completedDailies += 1;
     const rs = daily.rounds;
-    if (!rs?.length || rs.length < 4) continue;
+    if (!rs?.length || rs.length < DAILY_VERSE_COUNT) continue;
     if (rs.every((r) => effectiveDistance(r) === 0)) L.cleanSheets += 1;
     if (rs.every((r) => (Number(r.hintStep) || 1) <= 1)) L.noHintDailies += 1;
   }

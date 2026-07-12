@@ -101,7 +101,7 @@ describe("full round flow", () => {
     expect(done.result!.distancePts).toBe(500);
 
     let final = done;
-    for (let index = 1; index < 4; index += 1) {
+    for (let index = 1; index < 3; index += 1) {
       final = advanceDailyRound(final, texts);
       final = confirmGuess(final, final.poolItem.verseIndex, fixed).round;
     }
@@ -111,7 +111,7 @@ describe("full round flow", () => {
     expect(share!).toContain("Versemark 15 Aug 2026 · ");
     expect(share!).toContain(" pts\n\n");
     const body = share!.split("\n\n")[1];
-    expect(body.split(" \u00B7 ")).toHaveLength(4);
+    expect(body.split(" \u00B7 ")).toHaveLength(3);
     expect(share).toContain("https://versemark.app");
   });
 
@@ -199,25 +199,25 @@ describe("full round flow", () => {
     let next = advanceDailyRound(resumed, texts);
     expect(next.phase).toBe("playing");
     expect(next.daily!.index).toBe(1);
-    for (let i = 1; i < 4; i += 1) {
+    for (let i = 1; i < 3; i += 1) {
       const { round: confirmed, appState: state } = confirmGuess(
         next,
         next.poolItem.verseIndex,
         fixed
       );
-      if (i < 3) {
+      if (i < 2) {
         expect(state!.lastDaily!.completedAt).toBeNull();
         expect(state!.lastDaily!.rounds).toHaveLength(i + 1);
         next = advanceDailyRound(confirmed, texts);
       } else {
         expect(state!.lastDaily!.completedAt).not.toBeNull();
-        expect(state!.lastDaily!.rounds).toHaveLength(4);
+        expect(state!.lastDaily!.rounds).toHaveLength(3);
         expect(state!.streak).toBe(1);
         // Full resume lands on final verse with all results
         const full = startDailyRound(pool, texts, fixed);
         expect(full.phase).toBe("revealed");
-        expect(full.daily!.results).toHaveLength(4);
-        expect(full.daily!.index).toBe(3);
+        expect(full.daily!.results).toHaveLength(3);
+        expect(full.daily!.index).toBe(2);
         expect(shareForRound(full)).not.toBeNull();
       }
     }

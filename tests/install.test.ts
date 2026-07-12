@@ -36,7 +36,7 @@ beforeEach(() => {
 });
 
 function completeDaily(n: number, dateKey: string): DailyResultRecord {
-  const rounds = Array.from({ length: 4 }, (_, i) => ({
+  const rounds = Array.from({ length: 3 }, (_, i) => ({
     trueRef: `REF.${i}`,
     trueVerseIndex: 100 + i,
     trueRangeEndVerseIndex: 100 + i,
@@ -47,7 +47,7 @@ function completeDaily(n: number, dateKey: string): DailyResultRecord {
     at: `${dateKey}T12:00:00.000Z`,
     source: "daily" as const,
   }));
-  const last = rounds[3];
+  const last = rounds[rounds.length - 1];
   return {
     puzzleNumber: n,
     dateKey,
@@ -55,7 +55,7 @@ function completeDaily(n: number, dateKey: string): DailyResultRecord {
     trueVerseIndex: last.trueVerseIndex,
     trueRef: last.trueRef,
     distance: 0,
-    total: 3600,
+    total: 2700,
     hintStep: 1,
     completedAt: `${dateKey}T12:00:00.000Z`,
     rounds,

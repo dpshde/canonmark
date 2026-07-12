@@ -9,7 +9,7 @@ import { rngForPuzzle } from "./prng";
 
 export const DAILY_EPOCH = { year: 2026, month: 8, day: 1 } as const;
 export const NO_REPEAT_WINDOW = 180;
-export const DAILY_VERSE_COUNT = 4;
+export const DAILY_VERSE_COUNT = 3;
 
 export interface PoolItem {
   ref: string;
@@ -135,7 +135,7 @@ export function selectPoolItemForPuzzle(
   return pool.find((p) => p.ref === history[history.length - 1]) ?? pool[0];
 }
 
-/** Stable four-verse set for a Daily; slot zero preserves the original pick. */
+/** Stable three-verse set for a Daily; slot zero preserves the original pick. */
 export function selectPoolItemsForPuzzle(
   n: number,
   pool: PoolItem[],
