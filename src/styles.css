@@ -1187,6 +1187,14 @@ button:disabled {
   opacity: 1;
 }
 
+/* Featured next goal keeps full metal color even while locked */
+.achievement-row.is-next.is-locked .achievement-dropcap-frame,
+.achievement-row.is-next.is-locked .achievement-dropcap-frame.metal-gold,
+.achievement-row.is-next.is-locked .achievement-dropcap-frame.metal-snow {
+  filter: none;
+  opacity: 1;
+}
+
 .achievement-row.is-next .achievement-progress {
   margin-top: var(--space-sm);
 }

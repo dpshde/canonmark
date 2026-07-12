@@ -26,7 +26,7 @@ import {
   suggestGuessPassages,
   type GuessSuggestion,
 } from "./lib/guess-parse";
-import { hapticLight, hapticResult } from "./lib/haptics";
+import { hapticLight, hapticResult, bindTapHaptics } from "./lib/haptics";
 import { initSounds } from "./lib/sounds";
 import {
   initInstallCapture,
@@ -2332,6 +2332,7 @@ async function main(): Promise<void> {
   }
   initInstallCapture();
   void initSounds();
+  bindTapHaptics();
   installDebugApi();
   const params = new URLSearchParams(window.location.search);
   const sharedDaily = Number(params.get("daily"));
