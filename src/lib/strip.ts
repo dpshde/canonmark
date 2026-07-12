@@ -326,6 +326,11 @@ export class CanonStrip {
     return this.state.viewport.span <= PRECISION_THRESHOLD;
   }
 
+  /** True while a pointer is actively placing/dragging the marker. */
+  isPlacing(): boolean {
+    return this.placing;
+  }
+
   /** Return to the broad view captured before automatic precision zoom. */
   zoomOutFromPrecision(): void {
     if (!this.isPrecisionView()) return;
@@ -556,6 +561,7 @@ export class CanonStrip {
     };
 
     const endGesture = (opts?: { coast?: boolean }): void => {
+      const wasPlacing = this.placing;
       const shouldCoast = opts?.coast === true;
       const coastV = shouldCoast ? this.sampleCoastVelocity() : 0;
       this.dragging = false;
@@ -571,6 +577,10 @@ export class CanonStrip {
         this.startCoast(coastV);
       } else {
         this.render();
+      }
+      // Lift ends rough-place — progressive chrome (zoom bar) can appear now.
+      if (wasPlacing) {
+        this.onGuessChange?.(this.state.provisionalGuess);
       }
     };
 
@@ -1535,15 +1545,15 @@ export class CanonStrip {
         continue;
       }
 
-      const mid = (chapter.start + chapter.end) / 2;
-      const p = this.railPoint(mid, w, h);
+      // Anchor at chapter start (same as overview book labels), not mid-span.
+      const p = this.railPoint(chapter.start, w, h);
       const axis = isH ? p.x : p.y;
       if (!selected && axis - lastKept < minGap) continue;
       lastKept = axis;
 
       const label = `${chapter.bookName} ${chapter.chapter}`.toUpperCase();
       if (isH) {
-        // Wide: always above the rail (pre-experiment). Portrait owns notch-side.
+        // Wide: always above the rail (pre-experiment).
         const free = this.freeAxis();
         const labelX = Math.min(
           free.origin + free.length - 8,
@@ -1559,10 +1569,13 @@ export class CanonStrip {
         ctx.fillText(label, 0, 0, available);
         ctx.restore();
       } else {
+        // Portrait: chapter names left of the rail (with the notch ruler).
         const x =
-          cross + thick / 2 + NOTCH_GAP + ACTIVE_NOTCH_LENGTH + 10;
-        ctx.textAlign = "left";
-        ctx.fillText(label, x, p.y, Math.max(48, w - x - 6));
+          cross - thick / 2 - NOTCH_GAP - ACTIVE_NOTCH_LENGTH - 10;
+        // Top baseline at chapter start → name begins on the chapter, not above it.
+        ctx.textAlign = "right";
+        ctx.textBaseline = "top";
+        ctx.fillText(label, x, p.y + 1, Math.max(48, x - 6));
       }
     }
 
@@ -1602,7 +1615,7 @@ export class CanonStrip {
               ? 14
               : 10;
       ctx.strokeStyle = selected ? this.colors.ink : chapterStart ? this.colors.ink2 : this.colors.ink3;
-      ctx.globalAlpha = selected ? 1 : chapterStart ? 0.82 : milestone ? 0.62 : 0.42;
+      ctx.globalAlpha = selected ? 1 : chapterStart ? 0.62 : milestone ? 0.45 : hovered ? 0.38 : 0.28;
       ctx.lineWidth = selected ? 2.5 : chapterStart ? 1.5 : 1;
       ctx.beginPath();
       if (isH) {
@@ -1610,9 +1623,10 @@ export class CanonStrip {
         ctx.moveTo(p.x, start);
         ctx.lineTo(p.x, start + length);
       } else {
-        const start = cross + thick / 2 + NOTCH_GAP;
+        // Portrait: notches on the left of the rail (book/chapter column).
+        const start = cross - thick / 2 - NOTCH_GAP;
         ctx.moveTo(start, p.y);
-        ctx.lineTo(start + length, p.y);
+        ctx.lineTo(start - length, p.y);
       }
       ctx.stroke();
     }
@@ -1669,10 +1683,6 @@ export class CanonStrip {
     const gap = 6;
     /** Minimum spacing between book-name anchors along the rail. */
     const minGap = isH ? 18 : 14;
-    // Portrait only: selection owns the left with its large ref — books go right.
-    const oppositeSide =
-      !isH &&
-      (this.state.provisionalGuess != null || this.state.lockedGuess != null);
 
     // Chapter labels own the precision view; avoid a competing book label.
     if (vp.span <= PRECISION_THRESHOLD) return;
@@ -1723,17 +1733,8 @@ export class CanonStrip {
         ctx.rotate(-Math.PI / 2);
         ctx.textAlign = "left";
         ctx.fillText(c.name.toUpperCase(), 0, 0);
-      } else if (oppositeSide) {
-        // Portrait with selection: books on the right (notch side).
-        ctx.textAlign = "left";
-        ctx.textBaseline = "top";
-        ctx.fillText(
-          c.name.toUpperCase(),
-          c.p.x + thick / 2 + gap,
-          c.p.y + 1
-        );
       } else {
-        // Portrait/mobile default: upright at book start, left of the rail.
+        // Portrait: book names always left of the rail (selection owns the right).
         ctx.textAlign = "right";
         ctx.textBaseline = "top";
         ctx.fillText(
@@ -1883,8 +1884,8 @@ export class CanonStrip {
   /**
    * Selection callout:
    * - Wide: compact rotated ref at the pin (pre-experiment landscape).
-   * - Portrait scrubbing: compact upright full ref at the pin.
-   * - Portrait settled: large rotated full ref centered on the timeline.
+   * - Portrait scrubbing: compact upright full ref at the pin (right of rail).
+   * - Portrait settled: large rotated full ref on the right of the rail.
    */
   private drawSelectionLabel(
     verseIndex: number,
@@ -1926,10 +1927,11 @@ export class CanonStrip {
     ctx.restore();
   }
 
-  /** Compact upright reference beside the pin — portrait scrub only. */
+  /** Compact upright reference right of the pin — portrait scrub only. */
   private drawScrubPinLabel(text: string, p: Point, lifted: boolean): void {
     const { ctx } = this;
     const offset = this.railThick() / 2 + NOTCH_GAP + 6;
+    const w = this.canvasW || this.state.viewport.crossPx;
 
     ctx.save();
     ctx.fillStyle = selectionTextColor(this.colors.accentDeep);
@@ -1937,20 +1939,24 @@ export class CanonStrip {
     setLetterSpacing(ctx, "0.4px");
     ctx.textBaseline = "middle";
 
-    const x = p.x - offset + 6;
-    ctx.textAlign = "right";
-    ctx.fillText(text, x, p.y, Math.max(48, x - 4));
+    const x = p.x + offset - 6;
+    ctx.textAlign = "left";
+    ctx.fillText(text, x, p.y, Math.max(48, w - x - 4));
 
     setLetterSpacing(ctx, "0px");
     ctx.restore();
   }
 
-  /** Large rotated full reference, centered on the portrait timeline. */
+  /**
+   * Large rotated full reference on the right of the portrait rail.
+   * +90° so letter bases face the rail; books/notches keep the left.
+   */
   private drawSettledRefLabel(text: string, p: Point, lifted: boolean): void {
     const { ctx } = this;
     const size = lifted ? 36 : 30;
     const band = this.contentAxis();
     const axisMid = band.origin + band.length / 2;
+    const w = this.canvasW || this.state.viewport.crossPx;
 
     ctx.save();
     ctx.fillStyle = selectionTextColor(this.colors.accentDeep);
@@ -1959,9 +1965,9 @@ export class CanonStrip {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
-    const x = Math.max(20, p.x - this.railThick() / 2 - 24);
+    const x = Math.min(w - 20, p.x + this.railThick() / 2 + 24);
     ctx.translate(x, axisMid);
-    ctx.rotate(-Math.PI / 2);
+    ctx.rotate(Math.PI / 2);
     ctx.fillText(text, 0, 0, Math.max(96, band.length * 0.9));
 
     setLetterSpacing(ctx, "0px");

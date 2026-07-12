@@ -792,7 +792,7 @@ button:disabled {
   background: transparent;
 }
 
-/* Progressive disclosure: hide zoom until a marker exists (keep BSB|KJV) */
+/* Progressive disclosure: hide zoom until rough place lifts into refine */
 .hud[data-has-marker="false"] .zoom-bar {
   visibility: hidden;
   pointer-events: none;

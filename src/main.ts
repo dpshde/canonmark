@@ -1503,6 +1503,7 @@ function renderPlay(): void {
   });
   strip.setOnFreeViewChange(() => {
     activeZoom = null;
+    syncPlayStage();
     const zoomBar = document.querySelector<HTMLElement>(".zoom-bar");
     if (zoomBar) syncZoomBarUI(zoomBar);
   });
@@ -1796,26 +1797,31 @@ function syncTimelineCue(): void {
     cue.classList.remove("is-hidden", "is-refine");
     return;
   }
-  // Precision view owns the right of the rail (notches + chapter labels).
+  // Precision view owns the left of the rail (notches + chapter labels).
   // Dock already shows the guess + Confirm — drop the floating cue.
   cue.textContent = "";
   cue.classList.add("is-hidden", "is-refine");
 }
 
-/** Progressive disclosure: zoom + hint + type field after a marker. */
+/** Progressive disclosure: zoom + hint + type field after rough place lifts. */
 function syncPlayStage(): void {
   const hud = document.querySelector<HTMLElement>(".hud");
   if (!hud) return;
   const hasMarker = provisionalGuess != null;
-  hud.dataset.hasMarker = hasMarker ? "true" : "false";
+  // Keep overview chrome compact while the finger is still down; reveal once
+  // they lift (precision zoom) or when already refining in verse precision.
+  const roughPlacing =
+    (strip?.isPlacing() ?? false) && !(strip?.isPrecisionView() ?? false);
+  const revealPlayChrome = hasMarker && !roughPlacing;
+  hud.dataset.hasMarker = revealPlayChrome ? "true" : "false";
   const hintBtn = document.querySelector<HTMLButtonElement>("#btn-hint");
   if (hintBtn) {
-    hintBtn.hidden = !hasMarker;
-    hintBtn.tabIndex = hasMarker ? 0 : -1;
+    hintBtn.hidden = !revealPlayChrome;
+    hintBtn.tabIndex = revealPlayChrome ? 0 : -1;
   }
   const guessTools = document.querySelector<HTMLElement>(".guess-tools");
   if (guessTools) {
-    guessTools.hidden = !hasMarker;
+    guessTools.hidden = !revealPlayChrome;
   }
 }
 
