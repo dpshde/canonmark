@@ -155,6 +155,11 @@ function palette() {
   };
 }
 
+/** Selected verse callout: white in dark for contrast on the rail. */
+function selectionTextColor(light: string): string {
+  return resolvedTheme() === "dark" ? "#ffffff" : light;
+}
+
 /* ———— Types ———— */
 
 export interface StripState {
@@ -1763,7 +1768,8 @@ export class CanonStrip {
     const p = this.railPoint(ch, w, h);
     const result = this.state.revealed;
 
-    ctx.fillStyle = this.colors.accent;
+    // White pin while placing; revealed YOU stays accent vs TRUE green.
+    ctx.fillStyle = result ? this.colors.accent : "#ffffff";
     diamond(ctx, p.x, p.y, result ? 9 : lifted ? 8 : 6);
     ctx.fill();
     if (result) {
@@ -1775,6 +1781,14 @@ export class CanonStrip {
       ctx.fillStyle = this.colors.accent;
       diamond(ctx, p.x, p.y, 6.5);
       ctx.fill();
+    } else {
+      // Hairline so the white diamond reads on light rails.
+      ctx.strokeStyle = this.colors.ink;
+      ctx.globalAlpha = 0.35;
+      ctx.lineWidth = 1;
+      diamond(ctx, p.x, p.y, lifted ? 8 : 6);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
     }
 
     if (withLabel) {
@@ -1896,7 +1910,7 @@ export class CanonStrip {
     const offset = this.railThick() / 2 + NOTCH_GAP;
 
     ctx.save();
-    ctx.fillStyle = this.colors.accentDeep;
+    ctx.fillStyle = selectionTextColor(this.colors.accentDeep);
     ctx.font = `600 ${lifted ? 12 : 10}px ${SERIF}`;
     setLetterSpacing(ctx, "0.5px");
     ctx.textBaseline = "middle";
@@ -1918,7 +1932,7 @@ export class CanonStrip {
     const offset = this.railThick() / 2 + NOTCH_GAP + 6;
 
     ctx.save();
-    ctx.fillStyle = this.colors.accentDeep;
+    ctx.fillStyle = selectionTextColor(this.colors.accentDeep);
     ctx.font = `700 ${lifted ? 16 : 14}px ${SERIF}`;
     setLetterSpacing(ctx, "0.4px");
     ctx.textBaseline = "middle";
@@ -1939,7 +1953,7 @@ export class CanonStrip {
     const axisMid = band.origin + band.length / 2;
 
     ctx.save();
-    ctx.fillStyle = this.colors.accentDeep;
+    ctx.fillStyle = selectionTextColor(this.colors.accentDeep);
     ctx.font = `600 ${size}px ${SERIF}`;
     setLetterSpacing(ctx, "0.06em");
     ctx.textAlign = "center";
@@ -2043,13 +2057,19 @@ export class CanonStrip {
     ctx.globalAlpha = 1;
 
     // Center diamond
-    ctx.fillStyle = this.colors.accent;
+    ctx.fillStyle = "#ffffff";
     diamond(ctx, cx, cy, 7);
     ctx.fill();
+    ctx.strokeStyle = this.colors.ink;
+    ctx.globalAlpha = 0.35;
+    ctx.lineWidth = 1;
+    diamond(ctx, cx, cy, 7);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
 
     // Label inside lens
     const label = formatVerseLabel(focusVerse);
-    ctx.fillStyle = this.colors.accentDeep;
+    ctx.fillStyle = selectionTextColor(this.colors.accentDeep);
     ctx.font = `600 11px ${SERIF}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -2064,7 +2084,7 @@ export class CanonStrip {
     // Outer ring after clip restore
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.strokeStyle = this.colors.accentDeep;
+    ctx.strokeStyle = selectionTextColor(this.colors.accentDeep);
     ctx.globalAlpha = 0.35;
     ctx.lineWidth = 1;
     ctx.stroke();
