@@ -51,9 +51,14 @@ const ACTIVE_NOTCH_LENGTH = 28;
 /**
  * Always keep these start-anchors on the full-canon overview even when the
  * book is short in pixels — otherwise Epistles vanish after Acts.
- * Romans opens the letters; Revelation closes the canon.
+ * Spaced through the letters: Romans → Ephesians → Hebrews; Revelation closes.
  */
-export const OVERVIEW_LANDMARK_OSIS = new Set(["ROM", "REV"]);
+export const OVERVIEW_LANDMARK_OSIS = new Set([
+  "ROM",
+  "EPH",
+  "HEB",
+  "REV",
+]);
 
 /** Whether a book earns a name label on the overview rail. */
 export function isOverviewBookLabelCandidate(
@@ -63,6 +68,43 @@ export function isOverviewBookLabelCandidate(
 ): boolean {
   if (OVERVIEW_LANDMARK_OSIS.has(osis)) return true;
   return lenPx >= (orientation === "horizontal" ? 22 : 14);
+}
+
+export interface OverviewLabelCandidate {
+  osis: string;
+  name: string;
+  axis: number;
+  lenPx: number;
+  landmark: boolean;
+}
+
+/**
+ * Pick overview labels: landmarks first (so Epistles aren't crowded out),
+ * then ordinary long books into remaining gaps.
+ */
+export function pickOverviewBookLabels<T extends OverviewLabelCandidate>(
+  candidates: T[],
+  minGap: number
+): T[] {
+  const kept: T[] = [];
+  const fits = (c: T) =>
+    kept.every((k) => Math.abs(k.axis - c.axis) >= minGap);
+
+  const landmarks = candidates
+    .filter((c) => c.landmark)
+    .sort((a, b) => a.axis - b.axis);
+  for (const c of landmarks) {
+    if (fits(c)) kept.push(c);
+  }
+
+  const ordinary = candidates
+    .filter((c) => !c.landmark)
+    .sort((a, b) => a.axis - b.axis);
+  for (const c of ordinary) {
+    if (fits(c)) kept.push(c);
+  }
+
+  return kept.sort((a, b) => a.axis - b.axis);
 }
 
 /** Fallbacks when CSS variables are unavailable (tests / SSR). */
@@ -1630,12 +1672,7 @@ export class CanonStrip {
     // Chapter labels own the precision view; avoid a competing book label.
     if (vp.span <= PRECISION_THRESHOLD) return;
 
-    type Candidate = {
-      name: string;
-      axis: number;
-      p: Point;
-      lenPx: number;
-    };
+    type Candidate = OverviewLabelCandidate & { p: Point };
     const candidates: Candidate[] = [];
     for (const seg of bookSegments()) {
       // Anchor at the book start — skip if that edge isn't on-screen
@@ -1647,31 +1684,30 @@ export class CanonStrip {
       }
       const lenPx = this.chPx(seg.startVerseIndex, seg.endVerseIndex + 1);
       // Keep short books quiet, but retain enough landmarks to navigate the
-      // full-canon overview — including a couple after the Gospels.
+      // full-canon overview — including several through the Epistles.
       if (!isOverviewBookLabelCandidate(lenPx, seg.osis, vp.orientation)) {
         continue;
       }
       const p = this.railPoint(seg.startVerseIndex, w, h);
       candidates.push({
+        osis: seg.osis,
         name: seg.name,
         axis: isH ? p.x : p.y,
         p,
         lenPx,
+        landmark: OVERVIEW_LANDMARK_OSIS.has(seg.osis),
       });
     }
-    candidates.sort((a, b) => a.axis - b.axis);
+
+    const kept = pickOverviewBookLabels(candidates, minGap);
 
     ctx.save();
     ctx.font = `600 9px ${SERIF}`;
     setLetterSpacing(ctx, "0.5px");
     ctx.textBaseline = "middle";
 
-    let lastKept = -Infinity;
-    for (const c of candidates) {
-      if (c.axis - lastKept < minGap) continue;
-      lastKept = c.axis;
-
-      // Longer books stay fullest; short ones still need readable contrast.
+    for (const c of kept) {
+      // Longer books stay fullest; short landmarks still need readable contrast.
       const alpha = Math.min(1, 0.78 + (c.lenPx - 14) / 280);
       ctx.globalAlpha = alpha;
       ctx.fillStyle = this.colors.ink2;
