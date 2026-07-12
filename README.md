@@ -53,7 +53,7 @@ git push origin main   # triggers Vercel production if Git integration is on
 # or: vercel --prod --scope dpshde
 ```
 
-Decisions live in [`docs/decisions/`](docs/decisions/README.md). Art direction in [`docs/design/`](docs/design/README.md).
+Decisions live in [`docs/decisions/`](docs/decisions/README.md). Art direction in [`docs/design/`](docs/design/README.md). Achievement development and data-safety rules are in [`docs/achievements.md`](docs/achievements.md).
 
 ## Data rebuild
 
