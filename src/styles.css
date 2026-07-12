@@ -239,9 +239,10 @@ body {
 }
 
 .chrome-top-actions > .btn-ghost {
-  min-width: 44px;
+  /* Keep tall touch targets; tighten width so icons sit closer on mobile. */
+  min-width: 36px;
   min-height: 44px;
-  padding: var(--space-sm);
+  padding: var(--space-sm) var(--space-xs);
   color: var(--ink-3);
 }
 
@@ -272,7 +273,7 @@ body {
 .home-achievements-btn .achievements-dot {
   position: absolute;
   top: 8px;
-  right: 8px;
+  right: 4px;
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -791,7 +792,7 @@ button:disabled {
   background: transparent;
 }
 
-/* Progressive disclosure: hide zoom until a marker exists (keep BSB|KJV) */
+/* Progressive disclosure: hide zoom until rough place lifts into refine */
 .hud[data-has-marker="false"] .zoom-bar {
   visibility: hidden;
   pointer-events: none;
@@ -2071,6 +2072,15 @@ button:disabled {
 }
 
 @media (min-width: 720px) {
+  .chrome-top-actions > .btn-ghost {
+    min-width: 44px;
+    padding: var(--space-sm);
+  }
+
+  .home-achievements-btn .achievements-dot {
+    right: 8px;
+  }
+
   .verse-band {
     margin-top: var(--space-3xl);
   }

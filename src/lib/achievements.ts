@@ -10,9 +10,15 @@
 import { bookChapterVerseFromIndex } from "./books";
 import { DAILY_VERSE_COUNT } from "./daily";
 import { CLOSE_DISTANCE } from "./scoring";
-import { effectiveDistance, collectScoredRounds } from "./mastery";
+import {
+  effectiveDistance,
+  collectScoredRounds,
+  summarizeRollups,
+} from "./mastery";
 import {
   completedDailyCount,
+  collectConfirmedRounds,
+  coverageFromRounds,
   emptyLifetime,
   isDailyComplete,
   type AppState,
@@ -484,7 +490,8 @@ export function lifetimeFlagsForRound(r: RoundRecord): {
  */
 export function recomputeLifetimeFromLogs(state: AppState): LifetimeCounters {
   const L = emptyLifetime();
-  for (const r of collectScoredRounds(state)) {
+  const rounds = collectScoredRounds(state);
+  for (const r of rounds) {
     L.scoredRounds += 1;
     const f = lifetimeFlagsForRound(r);
     if (f.exact) {
@@ -503,17 +510,39 @@ export function recomputeLifetimeFromLogs(state: AppState): LifetimeCounters {
     if (rs.every((r) => effectiveDistance(r) === 0)) L.cleanSheets += 1;
     if (rs.every((r) => (Number(r.hintStep) || 1) <= 1)) L.noHintDailies += 1;
   }
+  const rolled = summarizeRollups(state.rollups ?? {});
+  // Window rounds (loop) + evicted rollups; also floor from never-trimmed
+  // practiceRounds plus any daily rounds still visible or rolled.
+  const dailyInHistory = state.history
+    .filter(isDailyComplete)
+    .reduce((n, d) => n + (d.rounds?.length || 0), 0);
+  const dailyInRollups = Math.max(0, rolled.rounds - rolled.practice);
   L.scoredRounds = Math.max(
-    L.scoredRounds,
-    state.practiceRounds +
-      state.history
-        .filter(isDailyComplete)
-        .reduce((n, d) => n + (d.rounds?.length || 0), 0)
+    L.scoredRounds + rolled.rounds,
+    state.practiceRounds + dailyInHistory + dailyInRollups
   );
+  L.exact += rolled.exact;
+  L.near += rolled.near;
   // Floor from history window when lifetime.completedDailies was never bumped
   L.completedDailies = Math.max(
     L.completedDailies,
     completedDailyCount(state)
+  );
+
+  const coverage = coverageFromRounds(collectConfirmedRounds(state));
+  L.totalPoints = coverage.totalPoints + rolled.points;
+  L.hintsClicked = coverage.hintsFromSteps;
+  L.uniqueVerses = Math.max(
+    coverage.verses.size,
+    state.touchedVerses?.length ?? 0
+  );
+  L.booksTouched = Math.max(
+    coverage.books.size,
+    state.touchedBooks?.length ?? 0
+  );
+  L.chaptersTouched = Math.max(
+    coverage.chapters.size,
+    state.touchedChapters?.length ?? 0
   );
   return L;
 }
@@ -534,6 +563,11 @@ export function effectiveLifetime(state: AppState): LifetimeCounters {
     ),
     cleanSheets: Math.max(stored.cleanSheets, fromLogs.cleanSheets),
     noHintDailies: Math.max(stored.noHintDailies, fromLogs.noHintDailies),
+    totalPoints: Math.max(stored.totalPoints, fromLogs.totalPoints),
+    hintsClicked: Math.max(stored.hintsClicked, fromLogs.hintsClicked),
+    uniqueVerses: Math.max(stored.uniqueVerses, fromLogs.uniqueVerses),
+    booksTouched: Math.max(stored.booksTouched, fromLogs.booksTouched),
+    chaptersTouched: Math.max(stored.chaptersTouched, fromLogs.chaptersTouched),
   };
 }
 

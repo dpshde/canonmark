@@ -17,11 +17,10 @@ import {
 import { buildDailyShareString, buildShareString } from "./share";
 import {
   getDailyForPuzzle,
-  recordDailyResult,
+  recordDailyScoredRound,
   recordPracticeResult,
   mergeAchievementUnlocks,
-  bumpLifetimeForRound,
-  updateLifetime,
+  recordHintClick,
   localDateKey,
   loadState,
   type AppState,
@@ -273,6 +272,7 @@ export function takeHint(round: RoundData): RoundData {
   // Step 2 with a singleton paragraph still only costs one tier (×2);
   // makeHintPanel surfaces the testament-half label instead of the verse again.
   const next = Math.min(3, (round.hintStep + 1) as HintStep) as HintStep;
+  recordHintClick();
   return { ...round, hintStep: next };
 }
 
@@ -327,6 +327,7 @@ export function confirmGuess(
   const flags = lifetimeFlagsForRound(finishedRecord);
 
   // Persist after every confirmed daily verse so refresh mid-run resumes.
+  // One load/save: history + rollups + lifetime + coverage together.
   if (round.mode === "daily" && round.puzzleNumber != null && next.daily) {
     const results = next.daily.results;
     const complete = results.length >= next.daily.items.length;
@@ -343,7 +344,7 @@ export function confirmGuess(
       at: r.at ?? at,
       source: "daily" as const,
     }));
-    appState = recordDailyResult(
+    appState = recordDailyScoredRound(
       {
         puzzleNumber: round.puzzleNumber,
         dateKey: localDateKey(now),
@@ -356,26 +357,25 @@ export function confirmGuess(
         completedAt: complete ? now.toISOString() : null,
         rounds,
       },
+      finishedRecord,
+      {
+        ...flags,
+        completedDaily: complete,
+        cleanSheet:
+          complete &&
+          rounds.length >= DAILY_VERSE_COUNT &&
+          rounds.every((r) => effectiveDistance(r) === 0),
+        noHintDaily:
+          complete &&
+          rounds.length >= DAILY_VERSE_COUNT &&
+          rounds.every((r) => (Number(r.hintStep) || 1) <= 1),
+      },
       now
     );
-    // Lifetime: every confirmed verse + daily tallies on full finish.
-    const nextLife = bumpLifetimeForRound(appState, flags);
-    if (complete) {
-      nextLife.completedDailies += 1;
-      if (rounds.length >= DAILY_VERSE_COUNT) {
-        if (rounds.every((r) => effectiveDistance(r) === 0)) {
-          nextLife.cleanSheets += 1;
-        }
-        if (rounds.every((r) => (Number(r.hintStep) || 1) <= 1)) {
-          nextLife.noHintDailies += 1;
-        }
-      }
-    }
-    appState = updateLifetime(nextLife);
     // Unlock after every verse so mid-daily exacts surface immediately.
     newlyUnlocked = syncUnlocks(now);
   } else if (round.mode === "endless") {
-    appState = recordPracticeResult(finishedRecord, flags);
+    appState = recordPracticeResult(finishedRecord, flags, now);
     newlyUnlocked = syncUnlocks(now);
   }
 

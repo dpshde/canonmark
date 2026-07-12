@@ -1,21 +1,27 @@
 /**
- * Book / genre mastery and weaknesses from scored rounds.
+ * Book / genre mastery and weaknesses from scored rounds + monthly rollups.
  * Mastery = median effective miss distance (lower is better).
  */
-import { bookChapterVerseFromIndex, type Genre } from "./books";
-import { CLOSE_DISTANCE } from "./scoring";
+import { bookChapterVerseFromIndex, BOOKS, type Genre } from "./books";
 import {
-  isDailyComplete,
+  CLOSE_DISTANCE,
+  DIST_BUCKET_COUNT,
+  DIST_BUCKET_REPS,
+  effectiveDistance,
+  VERSES_PER_CHAPTER,
+} from "./scoring";
+import {
   type AppState,
+  type BookRollup,
+  type MonthlyRollups,
   type RoundRecord,
 } from "./storage";
 import { resolvedTheme } from "./theme";
 
+export { effectiveDistance } from "./scoring";
+
 export const GENRE_SAMPLE_MIN = 3;
 export const BOOK_SAMPLE_MIN = 2;
-
-/** ~average verses per chapter across the Protestant canon. */
-const VERSES_PER_CHAPTER = 26;
 
 export interface MasterySlice {
   id: string;
@@ -83,16 +89,6 @@ export function masteryHeatColor(medianDistance: number | null): string {
   return `oklch(${L.toFixed(3)} ${C.toFixed(3)} ${H.toFixed(1)})`;
 }
 
-/** Guess inside truth range → 0; else min distance to either bound. */
-export function effectiveDistance(r: RoundRecord): number {
-  const start = r.trueVerseIndex;
-  const end =
-    r.trueRangeEndVerseIndex >= start ? r.trueRangeEndVerseIndex : start;
-  const g = r.guessVerseIndex;
-  if (g >= start && g <= end) return 0;
-  return Math.min(Math.abs(g - start), Math.abs(g - end));
-}
-
 /**
  * Median of a non-empty list. Even n averages the two middle values.
  * Empty → 0.
@@ -133,6 +129,10 @@ interface Acc {
   near: number;
 }
 
+function emptyAcc(label: string): Acc {
+  return { label, distances: [], exact: 0, near: 0 };
+}
+
 function accumulate(rounds: RoundRecord[]): {
   byBook: Map<string, Acc>;
   byGenre: Map<Genre, Acc>;
@@ -144,30 +144,81 @@ function accumulate(rounds: RoundRecord[]): {
     const loc = bookChapterVerseFromIndex(r.trueVerseIndex);
     if (!loc) continue;
     const bookKey = loc.book.osis;
-    const bookAcc = byBook.get(bookKey) ?? {
-      label: loc.book.name,
-      distances: [],
-      exact: 0,
-      near: 0,
-    };
+    const bookAcc = byBook.get(bookKey) ?? emptyAcc(loc.book.name);
     bookAcc.distances.push(d);
     if (d === 0) bookAcc.exact++;
     else if (d <= CLOSE_DISTANCE) bookAcc.near++;
     byBook.set(bookKey, bookAcc);
 
     const g = loc.book.genre;
-    const genreAcc = byGenre.get(g) ?? {
-      label: g.charAt(0).toUpperCase() + g.slice(1),
-      distances: [],
-      exact: 0,
-      near: 0,
-    };
+    const genreAcc = byGenre.get(g) ?? emptyAcc(genreLabel(g));
     genreAcc.distances.push(d);
     if (d === 0) genreAcc.exact++;
     else if (d <= CLOSE_DISTANCE) genreAcc.near++;
     byGenre.set(g, genreAcc);
   }
   return { byBook, byGenre };
+}
+
+/** Expand histogram buckets into representative distances for median/avg. */
+function expandHist(hist: number[]): number[] {
+  const out: number[] = [];
+  const n = Math.min(hist.length, DIST_BUCKET_COUNT);
+  for (let i = 0; i < n; i++) {
+    const count = Math.max(0, Math.floor(hist[i] ?? 0));
+    if (count <= 0) continue;
+    const rep =
+      DIST_BUCKET_REPS[i] ?? DIST_BUCKET_REPS[DIST_BUCKET_REPS.length - 1]!;
+    for (let k = 0; k < count; k++) out.push(rep);
+  }
+  return out;
+}
+
+function bookMeta(osis: string): { name: string; genre: Genre } | null {
+  const book = BOOKS.find((b) => b.osis === osis);
+  if (!book) return null;
+  return { name: book.name, genre: book.genre };
+}
+
+/**
+ * Merge monthly rollups into book/genre accumulators.
+ * Counts and histogram reps count toward sample minimums.
+ */
+function mergeRollups(
+  byBook: Map<string, Acc>,
+  byGenre: Map<Genre, Acc>,
+  rollups: MonthlyRollups
+): { rounds: number; practice: number; exact: number; near: number } {
+  let rounds = 0;
+  let practice = 0;
+  let exact = 0;
+  let near = 0;
+
+  for (const monthBooks of Object.values(rollups)) {
+    for (const [osis, ru] of Object.entries(monthBooks)) {
+      const meta = bookMeta(osis);
+      if (!meta) continue;
+      const distances = expandHist(ru.hist ?? []);
+      const bookAcc = byBook.get(osis) ?? emptyAcc(meta.name);
+      bookAcc.distances.push(...distances);
+      bookAcc.exact += ru.exact;
+      bookAcc.near += ru.near;
+      byBook.set(osis, bookAcc);
+
+      const genreAcc = byGenre.get(meta.genre) ?? emptyAcc(genreLabel(meta.genre));
+      genreAcc.distances.push(...distances);
+      genreAcc.exact += ru.exact;
+      genreAcc.near += ru.near;
+      byGenre.set(meta.genre, genreAcc);
+
+      rounds += ru.rounds;
+      practice += ru.practice;
+      exact += ru.exact;
+      near += ru.near;
+    }
+  }
+
+  return { rounds, practice, exact, near };
 }
 
 /** Strongest first: smaller median miss, then smaller average miss. */
@@ -195,12 +246,14 @@ function toSlice(id: string, acc: Acc): MasterySlice {
   };
 }
 
-/** All scored rounds from completed dailies + practice log. */
+/**
+ * All confirmed rounds from daily history + practice log (window only).
+ * Includes partial dailies so mastery matches coverage/lifetime and eviction.
+ */
 export function collectScoredRounds(state: AppState): RoundRecord[] {
   const out: RoundRecord[] = [];
   for (const daily of state.history) {
-    if (!isDailyComplete(daily)) continue;
-    for (const r of daily.rounds) {
+    for (const r of daily.rounds ?? []) {
       out.push({
         ...r,
         source: r.source === "practice" ? "practice" : "daily",
@@ -211,6 +264,31 @@ export function collectScoredRounds(state: AppState): RoundRecord[] {
     out.push({ ...r, source: "practice" });
   }
   return out;
+}
+
+/** Sum rollup counters across months/books. */
+export function summarizeRollups(rollups: MonthlyRollups): {
+  rounds: number;
+  practice: number;
+  exact: number;
+  near: number;
+  points: number;
+} {
+  let rounds = 0;
+  let practice = 0;
+  let exact = 0;
+  let near = 0;
+  let points = 0;
+  for (const monthBooks of Object.values(rollups)) {
+    for (const ru of Object.values(monthBooks) as BookRollup[]) {
+      rounds += ru.rounds;
+      practice += ru.practice;
+      exact += ru.exact;
+      near += ru.near;
+      points += ru.points ?? 0;
+    }
+  }
+  return { rounds, practice, exact, near, points };
 }
 
 export function computeMastery(state: AppState): MasteryReport {
@@ -228,6 +306,11 @@ export function computeMastery(state: AppState): MasteryReport {
   }
 
   const { byBook, byGenre } = accumulate(rounds);
+  const rolled = mergeRollups(byBook, byGenre, state.rollups ?? {});
+  exactCount += rolled.exact;
+  nearCount += rolled.near;
+  practiceRoundCount += rolled.practice;
+  dailyRoundCount += Math.max(0, rolled.rounds - rolled.practice);
 
   const genres = [...byGenre.entries()]
     .filter(([, a]) => a.distances.length >= GENRE_SAMPLE_MIN)
@@ -248,6 +331,7 @@ export function computeMastery(state: AppState): MasteryReport {
   const weakGenres = [...genres].reverse().slice(0, 3);
   const weakBooks = [...books].reverse().slice(0, 5);
 
+  // Window-only by design — rollups lack per-round refs for worst-list UI.
   const worstN = Math.min(
     10,
     Math.max(3, Math.ceil(rounds.length * 0.05))
@@ -266,7 +350,7 @@ export function computeMastery(state: AppState): MasteryReport {
     .slice(0, worstN);
 
   return {
-    totalRounds: rounds.length,
+    totalRounds: rounds.length + rolled.rounds,
     dailyRoundCount,
     practiceRoundCount,
     exactCount,

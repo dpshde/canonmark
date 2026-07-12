@@ -15,6 +15,7 @@ import {
   BOOK_SAMPLE_MIN,
 } from "../src/lib/mastery";
 import type { AppState, RoundRecord } from "../src/lib/storage";
+import { emptyAppState } from "../src/lib/storage";
 import { CLOSE_DISTANCE } from "../src/lib/scoring";
 
 function r(
@@ -35,27 +36,7 @@ function r(
   };
 }
 
-const emptyState = (): AppState => ({
-  lastDaily: null,
-  history: [],
-  streak: 0,
-  bestStreak: 0,
-  practiceRounds: 0,
-  practiceLog: [],
-  lifetime: {
-    scoredRounds: 0,
-    exact: 0,
-    near: 0,
-    sight: 0,
-    sameChapter: 0,
-    completedDailies: 0,
-    cleanSheets: 0,
-    noHintDailies: 0,
-  },
-  achievementUnlocks: {},
-  achievementsSeenAt: null,
-  installDismissedAt: null,
-});
+const emptyState = (): AppState => emptyAppState();
 
 describe("effectiveDistance", () => {
   it("is 0 when guess is inside the truth range", () => {
