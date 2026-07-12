@@ -1546,7 +1546,6 @@ function renderPlay(): void {
     "aria-label": modeAria,
     title: modeAria,
   });
-  const hasMarker = provisionalGuess != null;
 
   /*
    * Header center: OT · NT · Book (playing) with BSB | KJV to the right.
@@ -1632,18 +1631,22 @@ function renderPlay(): void {
   hud.append(hudMid);
 
   const dock = el("div", { class: "dock" });
-  hud.dataset.hasMarker = hasMarker ? "true" : "false";
-
-  /* Hints sit under the timeline, above readout / actions */
-  const hintPanel = makeHintPanel(round);
-  if (hintPanel) dock.append(hintPanel);
+  // Dock opens only in verse precision — start compact; syncPlayStage reveals.
+  hud.dataset.hasMarker = "false";
 
   if (round.phase === "playing") {
-    // Type field appears after a marker (rough → refine); zoom/hint same.
+    // Guess + Hint/Confirm rise together when precision opens.
+    const playChrome = el("div", { class: "play-chrome" });
+    playChrome.hidden = true;
+    playChrome.setAttribute("aria-hidden", "true");
+    const playChromeBody = el("div", { class: "play-chrome-body" });
+
+    const hintPanel = makeHintPanel(round);
+    if (hintPanel) playChromeBody.append(hintPanel);
+
     const guessTools = el("div", { class: "guess-tools" });
-    if (!hasMarker) guessTools.hidden = true;
     guessTools.append(makePrecisionZoomOut(), makeGuessInput());
-    dock.append(guessTools);
+    playChromeBody.append(guessTools);
 
     const actions = el("div", { class: "actions", id: "play-actions" });
     const hintBtn = el("button", {
@@ -1654,11 +1657,7 @@ function renderPlay(): void {
     });
     const hintsExhausted = !canTakeHint(round);
     if (hintsExhausted) hintBtn.disabled = true;
-    // Hidden until a marker exists — no score path without a guess.
-    if (!hasMarker) {
-      hintBtn.hidden = true;
-      hintBtn.tabIndex = -1;
-    }
+    hintBtn.tabIndex = -1;
     hintBtn.setAttribute(
       "aria-label",
       hintsExhausted ? "All hints used" : "Take a hint"
@@ -1689,8 +1688,6 @@ function renderPlay(): void {
         : guessInputInvalid
           ? "Fix the reference before confirming"
           : "Lock in your guess";
-    // No selection yet — drop the whole action row so the rail owns the height.
-    if (!hasMarker) actions.hidden = true;
     confirm.addEventListener("click", () => {
       if (!round || provisionalGuess == null) return;
       // Prefer whatever is currently typed if it parses
@@ -1715,7 +1712,9 @@ function renderPlay(): void {
     });
 
     actions.append(hintBtn, confirm);
-    dock.append(actions);
+    playChromeBody.append(actions);
+    playChrome.append(playChromeBody);
+    dock.append(playChrome);
   }
 
   if (round.phase === "revealed" && round.result) {
@@ -1757,7 +1756,8 @@ function renderPlay(): void {
     strip.lockGuess();
     strip.reveal(round.poolItem.verseIndex);
   } else if (provisionalGuess != null) {
-    strip.setProvisionalGuess(provisionalGuess);
+    // Mid-refine rebuild (e.g. after a hint) — return to verse precision + dock.
+    strip.focusGuessFromText(provisionalGuess);
   }
 
   /* Board is laid out by the HUD mid row — resize + publish verse-band bottom. */
@@ -2159,34 +2159,126 @@ function syncTimelineCue(): void {
   cue.classList.add("is-hidden", "is-refine");
 }
 
-/** Progressive disclosure: zoom + hint + type field after rough place lifts. */
+/** Progressive disclosure: dock chrome only while refining in verse precision. */
 function syncPlayStage(): void {
   const hud = document.querySelector<HTMLElement>(".hud");
   if (!hud) return;
   const hasMarker = provisionalGuess != null;
-  // Keep overview chrome compact while the finger is still down; reveal once
-  // they lift (precision zoom) or when already refining in verse precision.
-  const roughPlacing =
-    (strip?.isPlacing() ?? false) && !(strip?.isPrecisionView() ?? false);
-  const revealPlayChrome = hasMarker && !roughPlacing;
+  // Overview (rough place / zoom-out) keeps the rail; precision shows the dock.
+  // EnteringPrecision opens the dock as soon as zoom-in starts so map + chrome move together.
+  const revealPlayChrome =
+    hasMarker &&
+    ((strip?.isPrecisionView() ?? false) ||
+      (strip?.isEnteringPrecision() ?? false));
   hud.dataset.hasMarker = revealPlayChrome ? "true" : "false";
+
   const hintBtn = document.querySelector<HTMLButtonElement>("#btn-hint");
   if (hintBtn) {
-    hintBtn.hidden = !revealPlayChrome;
     hintBtn.tabIndex = revealPlayChrome ? 0 : -1;
   }
-  const guessTools = document.querySelector<HTMLElement>(".guess-tools");
-  if (guessTools) {
-    guessTools.hidden = !revealPlayChrome;
-  }
-  const playActions = document.querySelector<HTMLElement>("#play-actions");
-  if (playActions) {
-    playActions.hidden = !revealPlayChrome;
-  }
+
+  setPlayChromeVisible(revealPlayChrome);
+
   requestAnimationFrame(() => {
     syncVerseExpandToggle();
     syncChromeInsets();
   });
+}
+
+/** Rise the dock into place on precision; settle away on zoom-out. */
+function setPlayChromeVisible(show: boolean): void {
+  const chrome = document.querySelector<HTMLElement>(".play-chrome");
+  if (!chrome) return;
+
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const leaving = chrome.classList.contains("is-leaving");
+  const mounted = !chrome.hidden;
+
+  if (show) {
+    if (mounted && !leaving) {
+      chrome.classList.add("is-shown");
+      return;
+    }
+    chrome.hidden = false;
+    chrome.removeAttribute("aria-hidden");
+    chrome.classList.remove("is-leaving");
+    if (reduce) {
+      chrome.classList.add("is-shown");
+      requestAnimationFrame(() => syncChromeInsets());
+      return;
+    }
+    chrome.classList.remove("is-shown");
+    // One frame at 0fr so the rail can ease shut as chrome opens.
+    void chrome.offsetWidth;
+    chrome.classList.add("is-shown");
+    return;
+  }
+
+  // Hide
+  if (!mounted) return;
+  chrome.setAttribute("aria-hidden", "true");
+  if (reduce) {
+    chrome.hidden = true;
+    chrome.classList.remove("is-shown", "is-leaving");
+    requestAnimationFrame(() => syncChromeInsets());
+    return;
+  }
+
+  // Soft-leave already collapsing height — unmount only after rows hit 0fr.
+  if (leaving) {
+    finishPlayChromeUnmount(chrome);
+    return;
+  }
+
+  chrome.classList.remove("is-shown");
+  chrome.classList.add("is-leaving");
+  finishPlayChromeUnmount(chrome);
+}
+
+/** Unmount after the height collapse finishes (no rail length flash). */
+function finishPlayChromeUnmount(chrome: HTMLElement): void {
+  const body = chrome.querySelector<HTMLElement>(".play-chrome-body");
+  const alreadyCollapsed = !body || body.getBoundingClientRect().height < 1;
+
+  const unmount = (): void => {
+    chrome.hidden = true;
+    chrome.classList.remove("is-leaving", "is-shown");
+    requestAnimationFrame(() => syncChromeInsets());
+  };
+
+  if (alreadyCollapsed) {
+    unmount();
+    return;
+  }
+
+  let settled = false;
+  const finish = (event?: TransitionEvent): void => {
+    if (event && event.target !== chrome) return;
+    if (event && event.propertyName !== "grid-template-rows") return;
+    if (settled) return;
+    settled = true;
+    chrome.removeEventListener("transitionend", finish);
+    unmount();
+  };
+  chrome.addEventListener("transitionend", finish);
+  window.setTimeout(() => finish(), 320);
+}
+
+/**
+ * Start dock leave immediately on zoom-out. Height collapse (not display:none)
+ * is what eases the timeline longer; unmount waits for the map to settle.
+ */
+function softenPlayChromeForZoomOut(): void {
+  const chrome = document.querySelector<HTMLElement>(".play-chrome");
+  if (!chrome || chrome.hidden) return;
+  const hud = document.querySelector<HTMLElement>(".hud");
+  if (hud) hud.dataset.hasMarker = "false";
+  const hintBtn = document.querySelector<HTMLButtonElement>("#btn-hint");
+  if (hintBtn) hintBtn.tabIndex = -1;
+  chrome.setAttribute("aria-hidden", "true");
+  chrome.classList.remove("is-shown");
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  chrome.classList.add("is-leaving");
 }
 
 /** Push marker placement into the text field (unless the user is typing). */
@@ -2514,6 +2606,8 @@ function makePrecisionZoomOut(): HTMLButtonElement {
   zoomOut.addEventListener("click", () => {
     hapticLight();
     activeZoom = null;
+    // Fade chrome with the map; layout stays until the ease finishes.
+    softenPlayChromeForZoomOut();
     strip?.zoomOutFromPrecision();
     const bar = document.querySelector<HTMLElement>(".zoom-bar");
     if (bar) syncZoomBarUI(bar);

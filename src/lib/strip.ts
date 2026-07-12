@@ -42,7 +42,9 @@ import { resolvedTheme } from "./theme";
 
 const SERIF = 'Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif';
 const REVEAL_MS = 800;
-const PRECISION_ZOOM_MS = 220;
+const PRECISION_ZOOM_MS = 280;
+/** Zoom-out matches zoom-in so enter/exit feel like one gesture. */
+const PRECISION_ZOOM_OUT_MS = PRECISION_ZOOM_MS;
 /** Span at or below this counts as precision (must cover viewportForPrecision). */
 const PRECISION_THRESHOLD = 180;
 const NOTCH_GAP = 8;
@@ -256,6 +258,8 @@ export class CanonStrip {
   private viewportAnimFrame = 0;
   /** Broad view captured immediately before automatic verse-precision zoom. */
   private prePrecisionViewport: Viewport | null = null;
+  /** True while easing into verse precision — dock opens in parallel with the map. */
+  private enteringPrecision = false;
   private edgeScrollRaf = 0;
   private edgeScrollDirection = 0;
   private edgeScrollHoldStart = 0;
@@ -316,6 +320,7 @@ export class CanonStrip {
    */
   setZoomPreset(preset: ZoomPreset, focusVerse?: number): void {
     this.stopViewportAnimation();
+    this.enteringPrecision = false;
     this.prePrecisionViewport = null;
     const focus =
       focusVerse ??
@@ -333,6 +338,7 @@ export class CanonStrip {
   /** Restore full-canon overview (all zoom presets off). */
   clearZoom(): void {
     this.stopViewportAnimation();
+    this.enteringPrecision = false;
     this.prePrecisionViewport = null;
     this.state.viewport = viewportFullCanon(this.state.viewport);
     this.onFreeViewChange?.();
@@ -343,21 +349,29 @@ export class CanonStrip {
     return this.state.viewport.span <= PRECISION_THRESHOLD;
   }
 
+  /** True while the viewport is easing into verse precision. */
+  isEnteringPrecision(): boolean {
+    return this.enteringPrecision;
+  }
+
   /** True while a pointer is actively placing/dragging the marker. */
   isPlacing(): boolean {
     return this.placing;
   }
 
-  /** Return to the broad view captured before automatic precision zoom. */
+  /** Ease back to the broad view captured before automatic precision zoom. */
   zoomOutFromPrecision(): void {
-    if (!this.isPrecisionView()) return;
-    this.stopViewportAnimation();
-    this.state.viewport = this.prePrecisionViewport
-      ? { ...this.prePrecisionViewport }
+    if (!this.isPrecisionView() && !this.enteringPrecision) return;
+    this.enteringPrecision = false;
+    const target = this.prePrecisionViewport
+      ? {
+          ...this.state.viewport,
+          center: this.prePrecisionViewport.center,
+          span: this.prePrecisionViewport.span,
+        }
       : viewportFullCanon(this.state.viewport);
     this.prePrecisionViewport = null;
-    this.onFreeViewChange?.();
-    this.render();
+    this.animateToViewport(target, PRECISION_ZOOM_OUT_MS);
   }
 
   getState(): Readonly<StripState> { return this.state; }
@@ -399,17 +413,21 @@ export class CanonStrip {
     const v = clampVerse(verseIndex);
     this.state.provisionalGuess = v;
     this.syncAccessibility();
-    this.onGuessChange?.(v);
 
     const target = viewportForPrecision(this.state.viewport, v);
     if (this.isPrecisionView()) {
       this.stopViewportAnimation();
+      this.enteringPrecision = false;
       this.state.viewport = target;
+      this.onGuessChange?.(v);
       this.render();
       return;
     }
+    // Mark entering before guess notify so dock + map start together.
     this.prePrecisionViewport = { ...this.state.viewport };
-    this.animateToViewport(target);
+    this.enteringPrecision = true;
+    this.onGuessChange?.(v);
+    this.animateToViewport(target, PRECISION_ZOOM_MS);
   }
 
   lockGuess(): number | null {
@@ -420,6 +438,7 @@ export class CanonStrip {
 
   reveal(trueVerseIndex: number): void {
     this.stopViewportAnimation();
+    this.enteringPrecision = false;
     this.state.trueVerse = clampVerse(trueVerseIndex);
     this.state.revealed = true;
     // Zoom to the testament that holds the answer (OT or NT). Cross-testament
@@ -459,6 +478,7 @@ export class CanonStrip {
 
   resetForRound(): void {
     this.stopViewportAnimation();
+    this.enteringPrecision = false;
     this.state.provisionalGuess = null;
     this.state.lockedGuess = null;
     this.state.trueVerse = null;
@@ -495,7 +515,10 @@ export class CanonStrip {
   }
 
   /** Ease the viewport toward a target (span + center). Snaps under reduced motion. */
-  private animateToViewport(target: Viewport): void {
+  private animateToViewport(
+    target: Viewport,
+    durationMs: number = PRECISION_ZOOM_MS
+  ): void {
     const fromSpan = this.state.viewport.span;
     const fromCenter = this.state.viewport.center;
     this.stopViewportAnimation();
@@ -509,6 +532,7 @@ export class CanonStrip {
         center: target.center,
         span: target.span,
       };
+      this.endPrecisionEnter();
       this.onFreeViewChange?.();
       this.render();
       return;
@@ -520,6 +544,7 @@ export class CanonStrip {
         center: target.center,
         span: target.span,
       };
+      this.endPrecisionEnter();
       this.onFreeViewChange?.();
       this.render();
       return;
@@ -527,7 +552,7 @@ export class CanonStrip {
 
     const started = performance.now();
     const tick = (now: number): void => {
-      const raw = Math.min(1, (now - started) / PRECISION_ZOOM_MS);
+      const raw = Math.min(1, (now - started) / durationMs);
       const eased = easeOutCubic(raw);
       // Keep live axisPx/crossPx from resize; only tween span + center.
       this.state.viewport = {
@@ -545,6 +570,7 @@ export class CanonStrip {
           span: target.span,
         };
         this.viewportAnimFrame = 0;
+        this.endPrecisionEnter();
         this.onFreeViewChange?.();
         this.render();
       }
@@ -971,7 +997,22 @@ export class CanonStrip {
   /** Transition from broad canon placement into a verse-resolvable ruler. */
   private autoZoomForPrecision(focusVerse: number): void {
     this.prePrecisionViewport = { ...this.state.viewport };
-    this.animateToViewport(viewportForPrecision(this.state.viewport, focusVerse));
+    this.beginPrecisionEnter();
+    this.animateToViewport(
+      viewportForPrecision(this.state.viewport, focusVerse),
+      PRECISION_ZOOM_MS
+    );
+  }
+
+  /** Open dock chrome as soon as precision zoom starts — parallel with the map. */
+  private beginPrecisionEnter(): void {
+    this.enteringPrecision = true;
+    this.onFreeViewChange?.();
+  }
+
+  private endPrecisionEnter(): void {
+    if (!this.enteringPrecision) return;
+    this.enteringPrecision = false;
   }
 
   private stopViewportAnimation(): void {

@@ -61,6 +61,8 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --dur-fast: 0.15s;
   --dur-mid: 0.25s;
+  /* Rail grow/shrink when precision chrome opens or settles away */
+  --dur-rail: 0.28s;
 
   font-family: Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia,
     serif;
@@ -797,6 +799,18 @@ button:disabled {
 }
 
 /* Map zoom — segmented chip, same material as BSB|KJV */
+/* Progressive disclosure: hide zoom until rough place lifts into refine */
+.hud[data-has-marker="false"] .zoom-bar {
+  visibility: hidden;
+  pointer-events: none;
+  opacity: 0;
+  /* Reserve no space so translation stays centered alone */
+  width: 0;
+  border: none;
+  overflow: hidden;
+  margin: 0;
+}
+
 .zoom-bar {
   display: flex;
   gap: 0;
@@ -806,17 +820,8 @@ button:disabled {
   border-radius: 0;
   overflow: hidden;
   background: transparent;
-}
-
-/* Progressive disclosure: hide zoom until rough place lifts into refine */
-.hud[data-has-marker="false"] .zoom-bar {
-  visibility: hidden;
-  pointer-events: none;
-  /* Reserve no space so translation stays centered alone */
-  width: 0;
-  border: none;
-  overflow: hidden;
-  margin: 0;
+  opacity: 1;
+  transition: opacity var(--dur-mid) var(--ease-out);
 }
 
 .zoom-link {
@@ -2093,6 +2098,44 @@ button:disabled {
     var(--bg-0) 100%
   );
   margin-bottom: 0;
+  /* Lets the mid-row rail grow/shrink with chrome instead of flashing */
+  transition:
+    padding-top var(--dur-rail) var(--ease-out),
+    gap var(--dur-fast) var(--ease-out);
+}
+
+/* Play chrome — height drives rail length; opacity is secondary */
+.play-chrome {
+  display: grid;
+  grid-template-rows: 0fr;
+  width: 100%;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--dur-rail) var(--ease-out),
+    opacity var(--dur-mid) var(--ease-out);
+}
+
+.play-chrome[hidden] {
+  display: none !important;
+}
+
+.play-chrome.is-shown {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.play-chrome.is-leaving {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.play-chrome-body {
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
 }
 
 /* Hints — below timeline, above guess / Confirm */
@@ -2648,6 +2691,17 @@ button:disabled {
   }
 }
 
+/* Exit is shorter and opacity-led — no leftover transform on the resting node. */
+@keyframes fadeSink {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -2655,5 +2709,10 @@ button:disabled {
     animation-duration: 0.01s !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01s !important;
+  }
+
+  .play-chrome,
+  .dock {
+    transition: none !important;
   }
 }
