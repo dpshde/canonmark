@@ -12,6 +12,7 @@ import {
   scrubRampMultiplier,
   scrubVersesPerSecond,
   bookSegments,
+  bookSegmentAtT,
   testamentSeamT,
   viewportForZoomPreset,
   viewportForPrecision,
@@ -161,6 +162,15 @@ describe("placement math", () => {
     expect(segs).toHaveLength(66);
     expect(segs[0].startVerseIndex).toBe(1);
     expect(segs[65].endVerseIndex).toBe(TOTAL_VERSES);
+  });
+
+  it("bookSegmentAtT finds the book under a rail position", () => {
+    const segs = bookSegments();
+    expect(bookSegmentAtT(0, segs)?.osis).toBe("GEN");
+    expect(bookSegmentAtT(1, segs)?.osis).toBe("REV");
+    const psa = segs.find((s) => s.osis === "PSA")!;
+    const mid = (psa.t0 + psa.t1) / 2;
+    expect(bookSegmentAtT(mid, segs)?.osis).toBe("PSA");
   });
 });
 

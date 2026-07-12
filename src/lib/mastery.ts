@@ -9,6 +9,7 @@ import {
   type AppState,
   type RoundRecord,
 } from "./storage";
+import { resolvedTheme } from "./theme";
 
 export const GENRE_SAMPLE_MIN = 3;
 export const BOOK_SAMPLE_MIN = 2;
@@ -48,9 +49,38 @@ export interface MasteryReport {
   bestStreak: number;
   genres: MasterySlice[];
   books: MasterySlice[];
+  /** Every book with ≥1 scored round, keyed by OSIS id — for the canon heat map. */
+  bookHeat: Record<string, MasterySlice>;
   weakGenres: MasterySlice[];
   weakBooks: MasterySlice[];
   worstRounds: WorstRoundLine[];
+}
+
+/** Chapters-off scale where heat saturates (~200 chapters). */
+const HEAT_CHAPTER_CAP = 200;
+
+/**
+ * Map median miss → heat in 0..1 (0 = exact/strong, 1 = far/weak).
+ * Sqrt eases mid-range so modest misses don't all look identical.
+ */
+export function masteryHeatT(medianDistance: number): number {
+  if (!Number.isFinite(medianDistance) || medianDistance <= 0) return 0;
+  const chapters = medianDistance / VERSES_PER_CHAPTER;
+  return Math.min(1, Math.sqrt(chapters / HEAT_CHAPTER_CAP));
+}
+
+/**
+ * Heat color for a book segment. `null` = untested (rail).
+ * Strong → olive; weak → terracotta. Tracks light/dark surface luminance.
+ */
+export function masteryHeatColor(medianDistance: number | null): string {
+  if (medianDistance == null) return "var(--rail)";
+  const t = masteryHeatT(medianDistance);
+  const dark = resolvedTheme() === "dark";
+  const L = dark ? 0.38 + t * 0.28 : 0.84 - t * 0.36;
+  const C = dark ? 0.06 + t * 0.1 : 0.055 + t * 0.12;
+  const H = 145 - t * 105;
+  return `oklch(${L.toFixed(3)} ${C.toFixed(3)} ${H.toFixed(1)})`;
 }
 
 /** Guess inside truth range → 0; else min distance to either bound. */
@@ -90,12 +120,10 @@ export function formatMissDistance(d: number): string {
 }
 
 /**
- * Reader-facing median miss. "Typically" is the honest reading of a median.
+ * Reader-facing median miss (same units as a single-round miss).
  */
 export function formatMiss(d: number): string {
-  const base = formatMissDistance(d);
-  if (base === "exact") return "typically exact";
-  return `typically ${base}`;
+  return formatMissDistance(d);
 }
 
 interface Acc {
@@ -211,6 +239,12 @@ export function computeMastery(state: AppState): MasteryReport {
     .map(([id, a]) => toSlice(id, a))
     .sort(compareSlices);
 
+  const bookHeat: Record<string, MasterySlice> = {};
+  for (const [id, a] of byBook.entries()) {
+    if (a.distances.length < 1) continue;
+    bookHeat[id] = toSlice(id, a);
+  }
+
   const weakGenres = [...genres].reverse().slice(0, 3);
   const weakBooks = [...books].reverse().slice(0, 5);
 
@@ -241,6 +275,7 @@ export function computeMastery(state: AppState): MasteryReport {
     bestStreak: state.bestStreak,
     genres,
     books: books.slice(0, 8),
+    bookHeat,
     weakGenres,
     weakBooks,
     worstRounds,
@@ -258,4 +293,135 @@ export function genreLabel(genre: string): string {
     epistles: "Epistles",
   };
   return map[genre] ?? genre;
+}
+
+export type MasteryFocusMode = "farther" | "coverage" | "touch";
+
+export const MASTERY_FOCUS_MODES: ReadonlyArray<{
+  id: MasteryFocusMode;
+  label: string;
+}> = [
+  { id: "farther", label: "Farther" },
+  { id: "coverage", label: "Coverage" },
+  { id: "touch", label: "Closer" },
+] as const;
+
+export const FOCUS_GENRE_IDS = [
+  "law",
+  "history",
+  "poetry",
+  "prophets",
+  "gospels",
+  "epistles",
+] as const;
+
+/** Exact + near share of rounds (0 when untested). */
+export function touchRate(s: MasterySlice): number {
+  if (s.rounds <= 0) return 0;
+  return (s.exactCount + s.nearCount) / s.rounds;
+}
+
+/** Coverage while the rail is mostly gray; farther once there is signal. */
+export function defaultMasteryFocusMode(mastery: MasteryReport): MasteryFocusMode {
+  return Object.keys(mastery.bookHeat).length < 8 ? "coverage" : "farther";
+}
+
+export function emptyMasterySlice(id: string, label: string): MasterySlice {
+  return {
+    id,
+    label,
+    rounds: 0,
+    medianDistance: 0,
+    avgDistance: 0,
+    exactCount: 0,
+    nearCount: 0,
+  };
+}
+
+/** Right-column metric for a focus-mode row. */
+export function masteryFocusMetric(
+  s: MasterySlice,
+  mode: MasteryFocusMode
+): string {
+  if (s.rounds <= 0) return "not tested";
+  if (mode === "touch") {
+    const n = s.exactCount + s.nearCount;
+    return `${n}/${s.rounds} close`;
+  }
+  return formatMiss(s.medianDistance);
+}
+
+/**
+ * Books for a focus mode.
+ * <catalog> supplies OSIS + name for Coverage (full canon).
+ */
+export function booksForFocusMode(
+  mastery: MasteryReport,
+  mode: MasteryFocusMode,
+  catalog: ReadonlyArray<{ osis: string; name: string }>
+): MasterySlice[] {
+  const measured = Object.values(mastery.bookHeat);
+  if (mode === "farther") {
+    return [...measured].sort((a, b) => {
+      if (b.medianDistance !== a.medianDistance) {
+        return b.medianDistance - a.medianDistance;
+      }
+      return b.avgDistance - a.avgDistance;
+    });
+  }
+  if (mode === "touch") {
+    return [...measured].sort((a, b) => {
+      const tr = touchRate(b) - touchRate(a);
+      if (tr !== 0) return tr;
+      if (b.exactCount !== a.exactCount) return b.exactCount - a.exactCount;
+      return a.medianDistance - b.medianDistance;
+    });
+  }
+  return catalog
+    .map(
+      (b) => mastery.bookHeat[b.osis] ?? emptyMasterySlice(b.osis, b.name)
+    )
+    .sort((a, b) => {
+      if (a.rounds !== b.rounds) return a.rounds - b.rounds;
+      if (a.rounds === 0) return a.label.localeCompare(b.label);
+      if (b.medianDistance !== a.medianDistance) {
+        return b.medianDistance - a.medianDistance;
+      }
+      return a.label.localeCompare(b.label);
+    });
+}
+
+/** Genres for a focus mode (Coverage fills every genre slot). */
+export function genresForFocusMode(
+  mastery: MasteryReport,
+  mode: MasteryFocusMode
+): MasterySlice[] {
+  const measured = mastery.genres;
+  if (mode === "farther") {
+    return [...measured].sort((a, b) => {
+      if (b.medianDistance !== a.medianDistance) {
+        return b.medianDistance - a.medianDistance;
+      }
+      return b.avgDistance - a.avgDistance;
+    });
+  }
+  if (mode === "touch") {
+    return [...measured].sort((a, b) => {
+      const tr = touchRate(b) - touchRate(a);
+      if (tr !== 0) return tr;
+      if (b.exactCount !== a.exactCount) return b.exactCount - a.exactCount;
+      return a.medianDistance - b.medianDistance;
+    });
+  }
+  const byId = new Map(measured.map((g) => [g.id, g]));
+  return FOCUS_GENRE_IDS.map(
+    (id) => byId.get(id) ?? emptyMasterySlice(id, genreLabel(id))
+  ).sort((a, b) => {
+    if (a.rounds !== b.rounds) return a.rounds - b.rounds;
+    if (a.rounds === 0) return a.label.localeCompare(b.label);
+    if (b.medianDistance !== a.medianDistance) {
+      return b.medianDistance - a.medianDistance;
+    }
+    return a.label.localeCompare(b.label);
+  });
 }

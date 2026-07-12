@@ -5,6 +5,12 @@ import {
   median,
   formatMiss,
   formatMissDistance,
+  masteryHeatT,
+  masteryHeatColor,
+  booksForFocusMode,
+  defaultMasteryFocusMode,
+  touchRate,
+  masteryFocusMetric,
   GENRE_SAMPLE_MIN,
   BOOK_SAMPLE_MIN,
 } from "../src/lib/mastery";
@@ -107,20 +113,20 @@ describe("median", () => {
 describe("formatMiss / formatMissDistance", () => {
   it("labels exact landings", () => {
     expect(formatMissDistance(0)).toBe("exact");
-    expect(formatMiss(0)).toBe("typically exact");
+    expect(formatMiss(0)).toBe("exact");
   });
 
   it("uses verses under 20", () => {
     expect(formatMissDistance(3)).toBe("~3 verses off");
     expect(formatMissDistance(1)).toBe("~1 verse off");
-    expect(formatMiss(3)).toBe("typically ~3 verses off");
+    expect(formatMiss(3)).toBe("~3 verses off");
   });
 
   it("uses chapters for larger misses (~26 verses each)", () => {
     // 120 * 26 = 3120 → rounds to 120 chapters
     expect(formatMissDistance(3120)).toBe("~120 chapters off");
     expect(formatMissDistance(26)).toBe("~1 chapter off");
-    expect(formatMiss(3120)).toBe("typically ~120 chapters off");
+    expect(formatMiss(3120)).toBe("~120 chapters off");
   });
 });
 
@@ -264,5 +270,117 @@ describe("computeMastery", () => {
     expect(genIdx).toBeLessThan(exoIdx);
     // Weak list reverses
     expect(m.weakBooks[0]?.id).toBe("EXO");
+  });
+
+  it("exposes bookHeat for every book with at least one round", () => {
+    const log = [
+      r({ trueVerseIndex: 1, guessVerseIndex: 2, distance: 1, trueRef: "GEN.1.1" }),
+    ];
+    const m = computeMastery({
+      ...emptyState(),
+      practiceLog: log,
+      practiceRounds: 1,
+    });
+    expect(m.bookHeat.GEN?.rounds).toBe(1);
+    expect(m.books.find((b) => b.id === "GEN")).toBeUndefined();
+  });
+});
+
+describe("mastery focus modes", () => {
+  const catalog = [
+    { osis: "GEN", name: "Genesis" },
+    { osis: "EXO", name: "Exodus" },
+    { osis: "PSA", name: "Psalms" },
+  ];
+
+  it("defaults to coverage when few books are measured", () => {
+    const m = computeMastery({
+      ...emptyState(),
+      practiceLog: [
+        r({ trueVerseIndex: 1, guessVerseIndex: 2, distance: 1, trueRef: "GEN.1.1" }),
+      ],
+      practiceRounds: 1,
+    });
+    expect(defaultMasteryFocusMode(m)).toBe("coverage");
+  });
+
+  it("sorts farther farthest first and coverage untested first", () => {
+    const log = [
+      r({ trueVerseIndex: 1, guessVerseIndex: 2, distance: 1, trueRef: "GEN.1.1" }),
+      r({ trueVerseIndex: 1, guessVerseIndex: 3, distance: 2, trueRef: "GEN.1.1" }),
+      r({
+        trueVerseIndex: 1534,
+        guessVerseIndex: 1534 + 400,
+        distance: 400,
+        trueRef: "EXO.1.1",
+      }),
+      r({
+        trueVerseIndex: 1534,
+        guessVerseIndex: 1534 + 500,
+        distance: 500,
+        trueRef: "EXO.1.1",
+      }),
+    ];
+    const m = computeMastery({
+      ...emptyState(),
+      practiceLog: log,
+      practiceRounds: log.length,
+    });
+    const farther = booksForFocusMode(m, "farther", catalog);
+    expect(farther[0]?.id).toBe("EXO");
+    const coverage = booksForFocusMode(m, "coverage", catalog);
+    expect(coverage[0]?.id).toBe("PSA");
+    expect(coverage[0]?.rounds).toBe(0);
+  });
+
+  it("sorts touch by exact+near rate", () => {
+    // GEN: 2 exact of 2 → rate 1
+    // EXO: 0 close of 2 → rate 0
+    const log = [
+      r({ trueVerseIndex: 1, guessVerseIndex: 1, distance: 0, trueRef: "GEN.1.1" }),
+      r({ trueVerseIndex: 1, guessVerseIndex: 1, distance: 0, trueRef: "GEN.1.1" }),
+      r({
+        trueVerseIndex: 1534,
+        guessVerseIndex: 1534 + 100,
+        distance: 100,
+        trueRef: "EXO.1.1",
+      }),
+      r({
+        trueVerseIndex: 1534,
+        guessVerseIndex: 1534 + 200,
+        distance: 200,
+        trueRef: "EXO.1.1",
+      }),
+    ];
+    const m = computeMastery({
+      ...emptyState(),
+      practiceLog: log,
+      practiceRounds: log.length,
+    });
+    const touch = booksForFocusMode(m, "touch", catalog);
+    expect(touch[0]?.id).toBe("GEN");
+    expect(touchRate(touch[0]!)).toBe(1);
+    expect(masteryFocusMetric(touch[0]!, "touch")).toBe("2/2 close");
+  });
+});
+
+describe("masteryHeatT", () => {
+  it("is 0 for exact and saturates for far misses", () => {
+    expect(masteryHeatT(0)).toBe(0);
+    expect(masteryHeatT(-1)).toBe(0);
+    expect(masteryHeatT(26 * 200)).toBe(1);
+    expect(masteryHeatT(26 * 50)).toBeGreaterThan(0);
+    expect(masteryHeatT(26 * 50)).toBeLessThan(1);
+  });
+});
+
+describe("masteryHeatColor", () => {
+  it("uses the rail token when untested", () => {
+    expect(masteryHeatColor(null)).toBe("var(--rail)");
+  });
+
+  it("returns an oklch color for measured misses", () => {
+    expect(masteryHeatColor(0)).toMatch(/^oklch\(/);
+    expect(masteryHeatColor(5000)).toMatch(/^oklch\(/);
   });
 });

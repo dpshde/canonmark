@@ -32,18 +32,10 @@ import {
   routeBibleUrl,
 } from "./books";
 import { hapticLight, hapticSelection } from "./haptics";
+import { resolvedTheme } from "./theme";
 
 /* ———— Constants ———— */
 
-const ACCENT = "#b85a20";
-const ACCENT_DEEP = "#8f4516";
-const SUCCESS = "#5a8a3a";
-const SUCCESS_DEEP = "#3f6a28";
-const INK = "#2f2a25";
-const INK_2 = "#6e655a";
-const INK_3 = "#9a9088";
-const RAIL = "#e8e4de";
-const BG = "#faf8f4";
 const SERIF = 'Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif';
 const REVEAL_MS = 800;
 const PRECISION_ZOOM_MS = 220;
@@ -52,15 +44,53 @@ const PRECISION_THRESHOLD = 180;
 const NOTCH_GAP = 8;
 const ACTIVE_NOTCH_LENGTH = 28;
 
-/** Genre segment tints — soft but readable warm/cool bands along the rail. */
-const GENRE_TINT: Record<string, string> = {
-  law: "#c5d6b8",
-  history: "#e8d4a4",
-  poetry: "#d4c4e6",
-  prophets: "#e8c49a",
-  gospels: "#edd08c",
-  epistles: "#b8d4c4",
+/** Fallbacks when CSS variables are unavailable (tests / SSR). */
+const FALLBACK = {
+  accent: "#b85a20",
+  accentDeep: "#8f4516",
+  success: "#5a8a3a",
+  successDeep: "#3f6a28",
+  ink: "#2f2a25",
+  ink2: "#6e655a",
+  ink3: "#9a9088",
+  rail: "#e8e4de",
+  bg: "#faf8f4",
+  genre: {
+    law: "#c5d6b8",
+    history: "#e8d4a4",
+    poetry: "#d4c4e6",
+    prophets: "#e8c49a",
+    gospels: "#edd08c",
+    epistles: "#b8d4c4",
+  } as Record<string, string>,
 };
+
+function cssVar(name: string, fallback: string): string {
+  if (typeof document === "undefined") return fallback;
+  const v = getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim();
+  return v || fallback;
+}
+
+/** Live palette from design tokens (tracks light/dark). */
+function palette() {
+  return {
+    accent: cssVar("--accent", FALLBACK.accent),
+    accentDeep: cssVar("--accent-deep", FALLBACK.accentDeep),
+    success: cssVar("--success", FALLBACK.success),
+    successDeep: cssVar("--success", FALLBACK.successDeep),
+    ink: cssVar("--ink", FALLBACK.ink),
+    ink2: cssVar("--ink-2", FALLBACK.ink2),
+    ink3: cssVar("--ink-3", FALLBACK.ink3),
+    rail: cssVar("--rail", FALLBACK.rail),
+    bg: cssVar("--bg", FALLBACK.bg),
+    genre(genre: string): string {
+      const key = `--genre-${genre}`;
+      return cssVar(key, FALLBACK.genre[genre] ?? FALLBACK.rail);
+    },
+  };
+}
 
 /* ———— Types ———— */
 
@@ -109,6 +139,8 @@ export class CanonStrip {
   private dpr = 1;
   private canvasW = 0;
   private canvasH = 0;
+  /** Theme-aware colors, refreshed each paint. */
+  private colors = palette();
   private dragging = false;
   /** While true, drag moves the marker; edge zones may auto-scroll. */
   private placing = false;
@@ -810,6 +842,7 @@ export class CanonStrip {
   /* ———— Render ———— */
 
   render(): void {
+    this.colors = palette();
     // Always paint in full canvas CSS pixels. axisPx is the free-band length
     // (inset from header/footer) and must NOT be used as canvas height — that
     // left uncleared trails of marker labels under the dock.
@@ -906,7 +939,7 @@ export class CanonStrip {
 
   private drawBackground(w: number, h: number): void {
     const { ctx } = this;
-    ctx.fillStyle = BG;
+    ctx.fillStyle = this.colors.bg;
     ctx.fillRect(0, 0, w, h);
   }
 
@@ -922,7 +955,7 @@ export class CanonStrip {
     const free = this.freeAxis();
 
     // Rail base — only in free band between header/footer
-    ctx.fillStyle = RAIL;
+    ctx.fillStyle = this.colors.rail;
     if (isH) {
       ctx.fillRect(free.origin, cross - thick / 2, free.length, thick);
     } else {
@@ -939,7 +972,7 @@ export class CanonStrip {
       const len = isH ? toPx.x - fromPx.x : toPx.y - fromPx.y;
       if (len < 1) continue;
 
-      const tint = GENRE_TINT[seg.genre] ?? RAIL;
+      const tint = this.colors.genre(seg.genre);
       ctx.fillStyle = tint;
       if (isH) {
         ctx.fillRect(fromPx.x, cross - thick / 2, len, thick);
@@ -983,7 +1016,10 @@ export class CanonStrip {
     const { ctx } = this;
     ctx.save();
     ctx.font = `500 6.5px ${SERIF}`;
-    ctx.fillStyle = "rgba(47, 42, 37, 0.2)";
+    ctx.fillStyle =
+      resolvedTheme() === "dark"
+        ? "rgba(220, 210, 200, 0.22)"
+        : "rgba(47, 42, 37, 0.2)";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     setLetterSpacing(ctx, "0.8px");
@@ -1048,7 +1084,7 @@ export class CanonStrip {
 
     const { ctx } = this;
     ctx.save();
-    ctx.fillStyle = INK_2;
+    ctx.fillStyle = this.colors.ink2;
     ctx.globalAlpha = 0.9;
     ctx.font = `600 10px ${SERIF}`;
     ctx.textBaseline = "middle";
@@ -1127,7 +1163,7 @@ export class CanonStrip {
             : hovered
               ? 14
               : 10;
-      ctx.strokeStyle = selected ? INK : chapterStart ? INK_2 : INK_3;
+      ctx.strokeStyle = selected ? this.colors.ink : chapterStart ? this.colors.ink2 : this.colors.ink3;
       ctx.globalAlpha = selected ? 1 : chapterStart ? 0.82 : milestone ? 0.62 : 0.42;
       ctx.lineWidth = selected ? 2.5 : chapterStart ? 1.5 : 1;
       ctx.beginPath();
@@ -1158,7 +1194,7 @@ export class CanonStrip {
     const thick = this.railThick();
     const isH = vp.orientation === "horizontal";
 
-    ctx.strokeStyle = INK_3;
+    ctx.strokeStyle = this.colors.ink3;
     ctx.lineWidth = 1;
     ctx.setLineDash([2, 2]);
     ctx.beginPath();
@@ -1173,7 +1209,7 @@ export class CanonStrip {
     ctx.setLineDash([]);
 
     if (this.chPx(seam - 6, seam + 6) > 70) {
-      ctx.fillStyle = INK_3;
+      ctx.fillStyle = this.colors.ink3;
       ctx.font = `italic 9px ${SERIF}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -1215,7 +1251,10 @@ export class CanonStrip {
       if (lenPx < (isH ? 20 : 12)) continue;
       const alpha = Math.min(0.7, 0.3 + (lenPx - 14) / 200);
       const p = this.railPoint(seg.startVerseIndex, w, h);
-      ctx.fillStyle = `rgba(110, 101, 90, ${alpha})`;
+      ctx.fillStyle =
+        resolvedTheme() === "dark"
+          ? `rgba(200, 190, 180, ${alpha})`
+          : `rgba(110, 101, 90, ${alpha})`;
       ctx.save();
       if (isH) {
         // Landscape: above the rail at book start, rotated −90°
@@ -1253,7 +1292,7 @@ export class CanonStrip {
     ctx.save();
     ctx.font = `9px ${SERIF}`;
     setLetterSpacing(ctx, "1px");
-    ctx.fillStyle = INK_3;
+    ctx.fillStyle = this.colors.ink3;
 
     if (state.viewport.orientation === "vertical") {
       const labelX = Math.min(w - 8, cross + thick / 2 + 10);
@@ -1288,16 +1327,16 @@ export class CanonStrip {
     const p = this.railPoint(ch, w, h);
     const result = this.state.revealed;
 
-    ctx.fillStyle = ACCENT;
+    ctx.fillStyle = this.colors.accent;
     diamond(ctx, p.x, p.y, result ? 9 : lifted ? 8 : 6);
     ctx.fill();
     if (result) {
       // White inner ring so the pin reads against the rail
-      ctx.strokeStyle = BG;
+      ctx.strokeStyle = this.colors.bg;
       ctx.lineWidth = 1.5;
       diamond(ctx, p.x, p.y, 9);
       ctx.stroke();
-      ctx.fillStyle = ACCENT;
+      ctx.fillStyle = this.colors.accent;
       diamond(ctx, p.x, p.y, 6.5);
       ctx.fill();
     }
@@ -1310,7 +1349,7 @@ export class CanonStrip {
           p,
           w,
           h,
-          ACCENT_DEEP,
+          this.colors.accentDeep,
           labelSide,
           chipLayout
         );
@@ -1324,7 +1363,7 @@ export class CanonStrip {
     const { ctx } = this;
     const p = this.railPoint(ch, w, h);
     ctx.save();
-    ctx.strokeStyle = INK_2;
+    ctx.strokeStyle = this.colors.ink2;
     ctx.globalAlpha = 0.55;
     ctx.lineWidth = 1;
     diamond(ctx, p.x, p.y, 5);
@@ -1337,7 +1376,7 @@ export class CanonStrip {
     const { ctx } = this;
     const p = this.railPoint(ch, w, h);
     ctx.save();
-    ctx.strokeStyle = ACCENT;
+    ctx.strokeStyle = this.colors.accent;
     ctx.globalAlpha = 0.7;
     ctx.lineWidth = 2;
     diamond(ctx, p.x, p.y, 6);
@@ -1360,14 +1399,14 @@ export class CanonStrip {
 
     ctx.save();
     ctx.globalAlpha = k;
-    ctx.fillStyle = SUCCESS;
+    ctx.fillStyle = this.colors.success;
     diamond(ctx, p.x, p.y, 9 + 2 * (1 - k));
     ctx.fill();
-    ctx.strokeStyle = BG;
+    ctx.strokeStyle = this.colors.bg;
     ctx.lineWidth = 1.5;
     diamond(ctx, p.x, p.y, 9);
     ctx.stroke();
-    ctx.fillStyle = SUCCESS;
+    ctx.fillStyle = this.colors.success;
     diamond(ctx, p.x, p.y, 6.5);
     ctx.fill();
     ctx.restore();
@@ -1379,7 +1418,7 @@ export class CanonStrip {
         p,
         w,
         h,
-        SUCCESS_DEEP,
+        this.colors.successDeep,
         labelSide,
         chipLayout
       );
@@ -1400,7 +1439,7 @@ export class CanonStrip {
     const text = label.toUpperCase();
 
     ctx.save();
-    ctx.fillStyle = ACCENT_DEEP;
+    ctx.fillStyle = this.colors.accentDeep;
     ctx.font = `600 ${lifted ? 12 : 10}px ${SERIF}`;
     setLetterSpacing(ctx, "0.5px");
     ctx.textBaseline = "middle";
@@ -1624,7 +1663,7 @@ export class CanonStrip {
     ctx.save();
 
     // Transparent chip + strong border (page bg shows through)
-    ctx.fillStyle = BG;
+    ctx.fillStyle = this.colors.bg;
     roundedRect(ctx, bx, by, bw, bh, 5);
     ctx.fill();
     ctx.strokeStyle = ink;
@@ -1784,7 +1823,7 @@ export class CanonStrip {
     const from = this.railPoint(guess, w, h);
     const to = this.railPoint(toCh, w, h);
     ctx.save();
-    ctx.strokeStyle = INK;
+    ctx.strokeStyle = this.colors.ink;
     ctx.globalAlpha = 0.72;
     ctx.lineWidth = 2;
     ctx.setLineDash([3, 4]);

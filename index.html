@@ -15,6 +15,33 @@
       name="description"
       content="Versemark — mark where the verse lives in Scripture."
     />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("versemark:theme");
+          if (t === "light" || t === "dark") {
+            document.documentElement.setAttribute("data-theme", t);
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      html,
+      body {
+        background: #faf8f4;
+      }
+      @media (prefers-color-scheme: dark) {
+        html:not([data-theme="light"]) {
+          background: #1c1916;
+        }
+      }
+      html[data-theme="dark"] {
+        background: #1c1916;
+      }
+      html[data-theme="light"] {
+        background: #faf8f4;
+      }
+    </style>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="./favicon-32.png" type="image/png" sizes="32x32" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" sizes="180x180" />

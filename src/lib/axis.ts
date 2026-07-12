@@ -152,6 +152,22 @@ export function bookSegments(): BookSegment[] {
   }));
 }
 
+/**
+ * Book under a 0..1 position on the full-canon rail.
+ * <t> is clamped; the final book covers t === 1.
+ */
+export function bookSegmentAtT(
+  t: number,
+  segments: ReadonlyArray<BookSegment> = bookSegments()
+): BookSegment | null {
+  if (!segments.length) return null;
+  const x = Math.min(1, Math.max(0, t));
+  for (const s of segments) {
+    if (x >= s.t0 && x < s.t1) return s;
+  }
+  return segments[segments.length - 1] ?? null;
+}
+
 export function testamentSeamT(): number {
   return verseToT(TESTAMENT_SEAM_AFTER);
 }

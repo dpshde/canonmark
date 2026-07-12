@@ -18,7 +18,7 @@ import {
 } from "./lib/game";
 import { CanonStrip } from "./lib/strip";
 import { formatVerseLabel } from "./lib/books";
-import { bookSegments, testamentSeamT, type ZoomPreset } from "./lib/axis";
+import { bookSegments, bookSegmentAtT, testamentSeamT, type ZoomPreset } from "./lib/axis";
 import { shareText } from "./lib/share";
 import {
   parseGuessText,
@@ -45,8 +45,15 @@ import {
 import {
   computeMastery,
   formatMiss,
-  formatMissDistance,
+  masteryHeatColor,
+  booksForFocusMode,
+  genresForFocusMode,
+  defaultMasteryFocusMode,
+  masteryFocusMetric,
+  MASTERY_FOCUS_MODES,
+  type MasteryFocusMode,
   type MasteryReport,
+  type MasterySlice,
 } from "./lib/mastery";
 import {
   listAchievements,
@@ -56,6 +63,13 @@ import {
   dropCapPathsToPreload,
   type AchievementMetal,
 } from "./lib/achievements";
+import {
+  applyTheme,
+  cycleTheme,
+  loadThemePreference,
+  themeLabel,
+  type ThemePreference,
+} from "./lib/theme";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -216,6 +230,85 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+const THEME_ICONS: Record<ThemePreference, string> = {
+  system: `<svg class="theme-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <circle cx="12" cy="12" r="8.25" stroke="currentColor" stroke-width="1.6"/>
+    <path d="M12 3.75v16.5A8.25 8.25 0 0 1 12 3.75Z" fill="currentColor"/>
+  </svg>`,
+  light: `<svg class="theme-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <circle cx="12" cy="12" r="3.75" stroke="currentColor" stroke-width="1.6"/>
+    <path d="M12 3.5v1.75M12 18.75V20.5M3.5 12h1.75M18.75 12H20.5M6.05 6.05l1.24 1.24M16.71 16.71l1.24 1.24M6.05 17.95l1.24-1.24M16.71 7.29l1.24-1.24" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  </svg>`,
+  dark: `<svg class="theme-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M19.5 13.1A7.5 7.5 0 1 1 10.9 4.5 6 6 0 0 0 19.5 13.1Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+  </svg>`,
+};
+
+function syncThemeButton(btn: HTMLButtonElement): void {
+  const pref = loadThemePreference();
+  const label = themeLabel(pref);
+  btn.innerHTML = THEME_ICONS[pref];
+  btn.title = `Appearance: ${label}`;
+  btn.setAttribute("aria-label", `Appearance: ${label}. Click to change.`);
+}
+
+/** Recolor map heat after tokens flip (inline oklch, not CSS vars). */
+function refreshMasteryHeat(): void {
+  for (const btn of document.querySelectorAll<HTMLButtonElement>(
+    ".mastery-map-book"
+  )) {
+    const raw = btn.dataset.heat;
+    const dist =
+      raw === undefined || raw === "" ? null : Number(raw);
+    btn.style.background = masteryHeatColor(
+      dist == null || !Number.isFinite(dist) ? null : dist
+    );
+  }
+}
+
+/**
+ * Theme is CSS-driven via data-theme. Never remount screens — only sync
+ * chrome that paints outside the cascade (toggle icon, canvas, heat).
+ */
+function refreshThemeSurfaces(): void {
+  for (const btn of document.querySelectorAll<HTMLButtonElement>(
+    ".theme-toggle"
+  )) {
+    syncThemeButton(btn);
+  }
+  strip?.render();
+  refreshMasteryHeat();
+}
+
+function onThemeToggle(): void {
+  cycleTheme();
+  refreshThemeSurfaces();
+}
+
+function makeThemeToggle(extraClass = ""): HTMLButtonElement {
+  const btn = el("button", {
+    class: `btn-ghost theme-toggle${extraClass ? ` ${extraClass}` : ""}`,
+    type: "button",
+    id: "btn-theme",
+  });
+  syncThemeButton(btn);
+  btn.addEventListener("click", () => {
+    hapticLight();
+    onThemeToggle();
+  });
+  return btn;
+}
+
+function initTheme(): void {
+  applyTheme(loadThemePreference());
+  const mq = window.matchMedia("(prefers-color-scheme: dark)");
+  mq.addEventListener("change", () => {
+    if (loadThemePreference() !== "system") return;
+    applyTheme("system");
+    refreshThemeSurfaces();
+  });
+}
+
 function makeHomeTimeline(): HTMLElement {
   const timeline = el("div", {
     class: "home-timeline",
@@ -299,18 +392,29 @@ function renderAchievements(): void {
     renderHome();
   });
   top.append(
-    back,
-    el("h1", { class: "achievements-heading", text: "Achievements" })
+    el("div", {
+      class: "achievements-top-spacer",
+      "aria-hidden": "true",
+    }),
+    el("h1", { class: "achievements-heading", text: "Achievements" }),
+    (() => {
+      const actions = el("div", { class: "achievements-top-actions" });
+      actions.append(makeThemeToggle(), back);
+      return actions;
+    })()
   );
   screen.append(top);
 
   const body = el("div", { class: "achievements-body" });
 
-  // —— Summary (type-only, no label, no ruling) ——
+  // —— Summary (boxed like canon map / focus) ——
   const summary = el("div", {
     class: "achievements-summary",
     "aria-label": "Lifetime summary",
   });
+  summary.append(
+    el("h2", { class: "achievements-section-label", text: "Lifetime" })
+  );
   if (mastery.totalRounds === 0) {
     summary.append(
       el("p", {
@@ -319,89 +423,33 @@ function renderAchievements(): void {
       })
     );
   } else {
-    summary.append(
-      el("p", {
-        text: `${mastery.totalRounds} rounds · ${mastery.dailyRoundCount} daily · ${mastery.practiceRoundCount} practice`,
-      })
-    );
-    const parts = [
-      `${mastery.exactCount} exact`,
-      `${mastery.nearCount} near`,
-    ];
+    const grid = el("div", { class: "achievements-summary-grid" });
+    const addStat = (key: string, value: string) => {
+      grid.append(
+        el("div", { class: "achievements-summary-stat" }, [
+          el("span", { class: "achievements-summary-key", text: key }),
+          el("span", { class: "achievements-summary-val", text: value }),
+        ])
+      );
+    };
+    addStat("Rounds", String(mastery.totalRounds));
+    addStat("Daily", String(mastery.dailyRoundCount));
+    addStat("Practice", String(mastery.practiceRoundCount));
+    addStat("Exact", String(mastery.exactCount));
+    addStat("Near", String(mastery.nearCount));
     if (mastery.bestStreak > 0) {
-      parts.push(`streak ${mastery.streak} · best ${mastery.bestStreak}`);
+      addStat("Best streak", String(mastery.bestStreak));
     }
-    summary.append(el("p", { text: parts.join(" · ") }));
+    summary.append(grid);
   }
   body.append(summary);
 
   if (mastery.totalRounds > 0) {
-    // —— Genres ——
-    body.append(
-      el("h2", { class: "achievements-section-label", text: "Genres" })
-    );
-    if (!mastery.genres.length) {
-      body.append(
-        el("p", {
-          class: "achievements-sparse",
-          text: "Play a few more rounds across the canon to measure genres.",
-        })
-      );
-    } else {
-      body.append(masteryList(mastery.genres, "genre"));
-    }
+    const { map, focus } = makeMasterySection(mastery);
+    body.append(map);
 
-    // —— Books ——
-    body.append(
-      el("h2", { class: "achievements-section-label", text: "Books" })
-    );
-    if (!mastery.books.length) {
-      body.append(
-        el("p", {
-          class: "achievements-sparse",
-          text: "Books you've been tested on will appear here (two or more rounds).",
-        })
-      );
-    } else {
-      body.append(masteryList(mastery.books, "book"));
-    }
-
-    // Weak slices are named only when the lists are long enough that the
-    // bottom rows aren't already telling the same story.
-    const weakNames = [
-      ...(mastery.genres.length >= 3
-        ? mastery.weakGenres.slice(0, 2).map((g) => g.label)
-        : []),
-      ...(mastery.books.length >= 4
-        ? mastery.weakBooks.slice(0, 2).map((b) => b.label)
-        : []),
-    ];
-    if (weakNames.length) {
-      body.append(
-        el("p", {
-          class: "weak-lead",
-          text: `Needs map time · ${weakNames.join(", ")}`,
-        })
-      );
-    }
-
-    if (
-      mastery.worstRounds.length &&
-      mastery.worstRounds[0].effectiveDistance > 0
-    ) {
-      const details = el("details", { class: "worst-rounds" });
-      details.append(el("summary", { text: "Worst rounds" }));
-      const ol = el("ol", { class: "worst-rounds-list" });
-      for (const w of mastery.worstRounds) {
-        const guess = formatVerseLabel(w.guessVerseIndex);
-        const dist = formatMissDistance(w.effectiveDistance);
-        ol.append(
-          el("li", { text: `${w.trueRef} · placed ${guess} · ${dist}` })
-        );
-      }
-      details.append(ol);
-      body.append(details);
-    }
+    // Radio tabs + lists sit immediately above Unlocks
+    body.append(focus);
   }
 
   // —— Unlocks (open-ended ladders; total is visible goals, not a ceiling) ——
@@ -456,14 +504,22 @@ function renderAchievements(): void {
     ) {
       meta = `${a.current.toLocaleString()} / ${a.threshold.toLocaleString()}`;
     }
+    const head = el("p", { class: "achievement-head" }, [
+      el("span", { class: "achievement-title", text: a.title }),
+    ]);
+    const desc = el("p", { class: "achievement-desc", text: a.description });
+    const metaLine = el("span", { class: "achievement-meta", text: meta });
     const text = el("div", { class: "achievement-copy" });
-    text.append(
-      el("p", { class: "achievement-head" }, [
-        el("span", { class: "achievement-title", text: a.title }),
-        el("span", { class: "achievement-meta", text: meta }),
-      ]),
-      el("p", { class: "achievement-desc", text: a.description })
-    );
+    text.append(head, desc, metaLine);
+    if (!a.unlocked && a.progress != null && a.progress > 0) {
+      const bar = el("div", { class: "achievement-progress" }, [
+        el("div", {
+          class: "achievement-progress-fill",
+          style: `width:${Math.round(a.progress * 100)}%`,
+        }),
+      ]);
+      text.append(bar);
+    }
     li.append(frame, text);
     log.append(li);
   }
@@ -473,40 +529,533 @@ function renderAchievements(): void {
   app.append(screen);
 }
 
-function masteryList(
-  slices: MasteryReport["genres"],
-  kind: string
-): HTMLElement {
-  const ul = el("ul", {
-    class: "mastery-list",
-    "aria-label": `${kind} mastery`,
-  });
-  for (const s of slices) {
-    const name = el("span", { class: "mastery-name", text: s.label }, [
-      el("span", {
-        class: "mastery-count",
-        text: ` · ${s.rounds} rounds`,
-      }),
-    ]);
-    const row = el("li", { class: "mastery-row" }, [
-      el("div", { class: "mastery-row-main" }, [
-        name,
-        el("span", {
-          class: "mastery-miss",
-          text: formatMiss(s.medianDistance),
-        }),
-      ]),
-    ]);
-    const hits = [
-      s.exactCount > 0 ? `${s.exactCount} exact` : null,
-      s.nearCount > 0 ? `${s.nearCount} near` : null,
-    ].filter((p): p is string => p != null);
-    if (hits.length) {
-      row.append(el("p", { class: "mastery-sub", text: hits.join(" · ") }));
-    }
-    ul.append(row);
+function masteryAriaLabel(
+  slice: MasterySlice | undefined,
+  bookName: string
+): string {
+  if (!slice) return `${bookName}, not tested yet`;
+  const hits = [
+    slice.exactCount > 0 ? `${slice.exactCount} exact` : null,
+    slice.nearCount > 0 ? `${slice.nearCount} near` : null,
+  ].filter((p): p is string => p != null);
+  const parts = [
+    bookName,
+    `${slice.rounds} round${slice.rounds === 1 ? "" : "s"}`,
+    formatMiss(slice.medianDistance),
+    ...hits,
+  ];
+  return parts.join(", ");
+}
+
+function fillMasteryDetail(
+  detail: HTMLElement,
+  slice: MasterySlice | undefined,
+  bookName: string | null
+): void {
+  detail.replaceChildren();
+  if (!bookName) {
+    detail.append(
+      el("span", { class: "mastery-map-detail-meta", text: "No books measured yet." })
+    );
+    return;
   }
-  return ul;
+  detail.append(el("span", { class: "mastery-map-detail-name", text: bookName }));
+  if (!slice) {
+    detail.append(
+      el("span", { class: "mastery-map-detail-meta", text: "Not tested yet" })
+    );
+    return;
+  }
+  const hits = [
+    slice.exactCount > 0 ? `${slice.exactCount} exact` : null,
+    slice.nearCount > 0 ? `${slice.nearCount} near` : null,
+  ].filter((p): p is string => p != null);
+  const meta = [
+    formatMiss(slice.medianDistance),
+    `${slice.rounds} round${slice.rounds === 1 ? "" : "s"}`,
+    ...hits,
+  ].join(" · ");
+  detail.append(el("span", { class: "mastery-map-detail-meta", text: meta }));
+}
+
+function masteryMapChevron(): HTMLElement {
+  const chevron = el("span", {
+    class: "mastery-map-detail-chevron",
+    "aria-hidden": "true",
+  });
+  chevron.innerHTML = `<svg viewBox="0 0 16 16" fill="none" width="12" height="12"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter"/></svg>`;
+  return chevron;
+}
+
+/** Default selection: weakest measured book, else first book with any data. */
+function defaultMasteryFocus(mastery: MasteryReport): string | null {
+  const measured = Object.values(mastery.bookHeat);
+  if (!measured.length) return null;
+  measured.sort((a, b) => b.medianDistance - a.medianDistance);
+  return measured[0]!.id;
+}
+
+function makeMasterySection(mastery: MasteryReport): {
+  map: HTMLElement;
+  focus: HTMLElement;
+} {
+  const map = el("div", { class: "mastery-map" });
+  map.append(
+    el("h2", { class: "achievements-section-label", text: "Canon map" })
+  );
+
+  const measured = Object.keys(mastery.bookHeat).length;
+  if (measured === 0) {
+    map.append(
+      el("p", {
+        class: "mastery-map-hint",
+        text: "Play a few more rounds — tested books will warm on the rail.",
+      })
+    );
+  }
+
+  const rail = el("div", {
+    class: "mastery-map-rail",
+    role: "group",
+    "aria-label": "Canon mastery by book",
+  });
+
+  let selected = defaultMasteryFocus(mastery);
+  let mode: MasteryFocusMode = defaultMasteryFocusMode(mastery);
+  const mapButtons: HTMLButtonElement[] = [];
+  const listButtons: HTMLButtonElement[] = [];
+  const pickerButtons: HTMLButtonElement[] = [];
+  const segments = bookSegments();
+
+  const picker = el("div", { class: "mastery-map-picker" });
+  const detailBtn = el("button", {
+    class: "mastery-map-detail",
+    type: "button",
+    "aria-expanded": "false",
+    "aria-controls": "mastery-map-book-picker",
+    "aria-label": "Choose a book on the canon map",
+  });
+  const detailMain = el("span", {
+    class: "mastery-map-detail-main",
+    "aria-live": "polite",
+  });
+  detailBtn.append(detailMain, masteryMapChevron());
+  const pickerList = el("ul", {
+    class: "mastery-map-picker-list",
+    id: "mastery-map-book-picker",
+    role: "listbox",
+    "aria-label": "Books",
+  });
+  pickerList.hidden = true;
+  picker.append(detailBtn, pickerList);
+
+  let pickerOpen = false;
+  const setPickerOpen = (open: boolean) => {
+    pickerOpen = open;
+    detailBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    detailBtn.classList.toggle("is-expanded", open);
+    pickerList.hidden = !open;
+    if (open) {
+      const active = pickerButtons.find((b) => b.dataset.osis === selected);
+      // After layout, center the current book in the picker viewport.
+      requestAnimationFrame(() => {
+        active?.scrollIntoView({ block: "center", inline: "nearest" });
+      });
+    }
+  };
+
+  detailBtn.addEventListener("click", () => {
+    hapticLight();
+    setPickerOpen(!pickerOpen);
+  });
+
+  const syncPickerSelection = () => {
+    for (const b of pickerButtons) {
+      const on = b.dataset.osis === selected;
+      b.classList.toggle("is-selected", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    }
+  };
+
+  const selectAtClientX = (clientX: number, haptic: boolean) => {
+    const rect = rail.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const seg = bookSegmentAtT((clientX - rect.left) / rect.width, segments);
+    if (!seg || seg.osis === selected) return;
+    if (haptic) hapticLight();
+    if (pickerOpen) setPickerOpen(false);
+    selectBook(seg.osis, seg.name, mastery.bookHeat[seg.osis]);
+  };
+
+  let scrubbing = false;
+  let suppressClick = false;
+
+  rail.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    scrubbing = true;
+    suppressClick = true;
+    rail.classList.add("is-scrubbing");
+    rail.setPointerCapture(e.pointerId);
+    selectAtClientX(e.clientX, true);
+  });
+
+  rail.addEventListener("pointermove", (e) => {
+    if (!scrubbing) return;
+    selectAtClientX(e.clientX, true);
+  });
+
+  const endScrub = (e: PointerEvent) => {
+    if (!scrubbing) return;
+    scrubbing = false;
+    rail.classList.remove("is-scrubbing");
+    if (rail.hasPointerCapture(e.pointerId)) {
+      rail.releasePointerCapture(e.pointerId);
+    }
+    // Click follows pointerup in the same turn; clear afterward.
+    window.setTimeout(() => {
+      suppressClick = false;
+    }, 0);
+  };
+
+  rail.addEventListener("pointerup", endScrub);
+  rail.addEventListener("pointercancel", endScrub);
+
+  for (const segment of segments) {
+    const slice = mastery.bookHeat[segment.osis];
+    const btn = el("button", {
+      class: "mastery-map-book",
+      type: "button",
+      "data-osis": segment.osis,
+      "aria-label": masteryAriaLabel(slice, segment.name),
+      "aria-pressed": selected === segment.osis ? "true" : "false",
+      title: segment.name,
+    });
+    const span = Math.max(0, segment.t1 - segment.t0);
+    btn.style.left = `${segment.t0 * 100}%`;
+    btn.style.width = `${span * 100}%`;
+    if (slice) btn.dataset.heat = String(slice.medianDistance);
+    btn.style.background = masteryHeatColor(
+      slice ? slice.medianDistance : null
+    );
+    if (selected === segment.osis) btn.classList.add("is-selected");
+    btn.addEventListener("click", (e) => {
+      // Pointer scrub already selected; keep click for keyboard activation.
+      if (suppressClick) {
+        e.preventDefault();
+        suppressClick = false;
+        return;
+      }
+      hapticLight();
+      selectBook(segment.osis, segment.name, slice);
+    });
+    mapButtons.push(btn);
+    rail.append(btn);
+
+    const opt = el("li", { class: "mastery-map-picker-row", role: "none" });
+    const optBtn = el("button", {
+      class: "mastery-map-picker-btn",
+      type: "button",
+      role: "option",
+      "data-osis": segment.osis,
+      "aria-selected": selected === segment.osis ? "true" : "false",
+    });
+    if (selected === segment.osis) optBtn.classList.add("is-selected");
+    const miss = slice
+      ? formatMiss(slice.medianDistance)
+      : "Not tested yet";
+    optBtn.append(
+      el("span", { class: "mastery-map-picker-name", text: segment.name }),
+      el("span", { class: "mastery-map-picker-meta", text: miss })
+    );
+    optBtn.addEventListener("click", () => {
+      hapticLight();
+      selectBook(segment.osis, segment.name, slice);
+      setPickerOpen(false);
+    });
+    pickerButtons.push(optBtn);
+    opt.append(optBtn);
+    pickerList.append(opt);
+  }
+
+  const seam = el("span", { class: "mastery-map-seam", "aria-hidden": "true" });
+  seam.style.left = `${testamentSeamT() * 100}%`;
+  rail.append(seam);
+
+  map.append(rail);
+  map.append(
+    el("div", { class: "mastery-map-ends" }, [
+      el("span", { text: "Genesis" }),
+      el("span", { text: "Revelation" }),
+    ])
+  );
+
+  const focusSeg = segments.find((s) => s.osis === selected);
+  const focusSlice = selected ? mastery.bookHeat[selected] : undefined;
+  fillMasteryDetail(detailMain, focusSlice, focusSeg?.name ?? null);
+  map.append(picker);
+  map.append(
+    el("div", {
+      class: "mastery-map-legend",
+      "aria-hidden": "true",
+    }, [
+      el("span", { text: "Closer" }),
+      el("span", { class: "mastery-map-legend-ramp" }),
+      el("span", { text: "Farther" }),
+    ])
+  );
+
+  // Radio tabs + lists — placed just above Unlocks by the caller
+  const focus = el("div", { class: "mastery-focus-block" });
+  const modeBar = el("div", {
+    class: "mastery-focus",
+    role: "radiogroup",
+    "aria-label": "Mastery focus",
+  });
+  const modeButtons: HTMLButtonElement[] = [];
+  const listsHost = el("div", { class: "mastery-lists" });
+
+  const catalog = bookSegments().map((s) => ({
+    osis: s.osis,
+    name: s.name,
+  }));
+
+  const MASTERY_PREVIEW = 4;
+  let booksExpanded = false;
+  let genresExpanded = false;
+
+  const syncListSelection = () => {
+    for (const b of listButtons) {
+      const on = b.dataset.osis === selected;
+      b.classList.toggle("is-selected", on);
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+      if (on) {
+        const reduce = window.matchMedia(
+          "(prefers-reduced-motion: reduce)"
+        ).matches;
+        b.scrollIntoView({
+          block: "nearest",
+          behavior: reduce ? "auto" : "smooth",
+        });
+      }
+    }
+  };
+
+  const selectBook = (
+    osis: string,
+    name: string,
+    slice: MasterySlice | undefined
+  ) => {
+    selected = osis;
+    for (const b of mapButtons) {
+      const on = b.dataset.osis === osis;
+      b.classList.toggle("is-selected", on);
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    fillMasteryDetail(detailMain, slice, name);
+    syncPickerSelection();
+
+    const visible = listButtons.some((b) => b.dataset.osis === osis);
+    if (!visible && !booksExpanded) {
+      booksExpanded = true;
+      renderLists(mode);
+      syncListSelection();
+      return;
+    }
+    syncListSelection();
+  };
+
+  const renderLists = (next: MasteryFocusMode) => {
+    mode = next;
+    for (const b of modeButtons) {
+      const on = b.dataset.mode === mode;
+      b.classList.toggle("is-active", on);
+      b.setAttribute("aria-checked", on ? "true" : "false");
+    }
+
+    listsHost.replaceChildren();
+    listButtons.length = 0;
+
+    const books = booksForFocusMode(mastery, mode, catalog);
+    appendCollapsibleList({
+      title: "Books",
+      items: books,
+      expanded: booksExpanded,
+      empty:
+        mode === "touch"
+          ? "Land a few exact or near guesses to rank closer hits."
+          : "Finish a few rounds to see where misses run farther.",
+      onToggle: () => {
+        booksExpanded = !booksExpanded;
+        hapticLight();
+        renderLists(mode);
+      },
+      build: (slice) => buildBookList(slice, mode),
+    });
+
+    const genres = genresForFocusMode(mastery, mode);
+    appendCollapsibleList({
+      title: "Genres",
+      items: genres,
+      expanded: genresExpanded,
+      empty: "Play across more of the canon to measure genres.",
+      onToggle: () => {
+        genresExpanded = !genresExpanded;
+        hapticLight();
+        renderLists(mode);
+      },
+      build: (slice) => buildGenreList(slice, mode),
+    });
+  };
+
+  function appendCollapsibleList(opts: {
+    title: string;
+    items: MasterySlice[];
+    expanded: boolean;
+    empty: string;
+    onToggle: () => void;
+    build: (items: MasterySlice[]) => HTMLElement;
+  }): void {
+    const needsToggle = opts.items.length > MASTERY_PREVIEW;
+
+    if (needsToggle) {
+      const header = el("button", {
+        class: "mastery-list-header",
+        type: "button",
+        "aria-expanded": opts.expanded ? "true" : "false",
+      });
+      if (opts.expanded) header.classList.add("is-expanded");
+      const chevron = el("span", {
+        class: "mastery-list-chevron",
+        "aria-hidden": "true",
+      });
+      chevron.innerHTML = `<svg viewBox="0 0 16 16" fill="none" width="12" height="12"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter"/></svg>`;
+      header.append(
+        el("span", { class: "mastery-list-header-label", text: opts.title }),
+        chevron
+      );
+      header.addEventListener("click", opts.onToggle);
+      listsHost.append(header);
+    } else {
+      listsHost.append(
+        el("h2", { class: "achievements-section-label", text: opts.title })
+      );
+    }
+
+    if (!opts.items.length) {
+      listsHost.append(
+        el("p", { class: "achievements-sparse", text: opts.empty })
+      );
+      return;
+    }
+
+    const visible =
+      needsToggle && !opts.expanded
+        ? opts.items.slice(0, MASTERY_PREVIEW)
+        : opts.items;
+    listsHost.append(opts.build(visible));
+  }
+
+  function buildBookList(
+    books: MasterySlice[],
+    focusMode: MasteryFocusMode
+  ): HTMLElement {
+    const ul = el("ul", {
+      class: "mastery-list",
+      "aria-label": "Book mastery",
+    });
+    for (const s of books) {
+      const row = el("li", { class: "mastery-row" });
+      const slice = s.rounds > 0 ? s : undefined;
+      const btn = el("button", {
+        class: "mastery-row-btn",
+        type: "button",
+        "data-osis": s.id,
+        "aria-pressed": selected === s.id ? "true" : "false",
+      });
+      if (selected === s.id) btn.classList.add("is-selected");
+      const count =
+        s.rounds > 0
+          ? ` · ${s.rounds} round${s.rounds === 1 ? "" : "s"}`
+          : "";
+      const name = el("span", { class: "mastery-name", text: s.label }, [
+        el("span", { class: "mastery-count", text: count }),
+      ]);
+      btn.append(
+        el("div", { class: "mastery-row-main" }, [
+          name,
+          el("span", {
+            class: "mastery-miss",
+            text: masteryFocusMetric(s, focusMode),
+          }),
+        ])
+      );
+      btn.addEventListener("click", () => {
+        hapticLight();
+        selectBook(s.id, s.label, slice);
+      });
+      listButtons.push(btn);
+      row.append(btn);
+      ul.append(row);
+    }
+    return ul;
+  }
+
+  function buildGenreList(
+    genres: MasterySlice[],
+    focusMode: MasteryFocusMode
+  ): HTMLElement {
+    const ul = el("ul", {
+      class: "mastery-list",
+      "aria-label": "Genre mastery",
+    });
+    for (const s of genres) {
+      const count =
+        s.rounds > 0
+          ? ` · ${s.rounds} round${s.rounds === 1 ? "" : "s"}`
+          : "";
+      const name = el("span", { class: "mastery-name", text: s.label }, [
+        el("span", { class: "mastery-count", text: count }),
+      ]);
+      const row = el("li", { class: "mastery-row" }, [
+        el("div", { class: "mastery-row-main" }, [
+          name,
+          el("span", {
+            class: "mastery-miss",
+            text: masteryFocusMetric(s, focusMode),
+          }),
+        ]),
+      ]);
+      ul.append(row);
+    }
+    return ul;
+  }
+
+  for (const m of MASTERY_FOCUS_MODES) {
+    const btn = el("button", {
+      class: "mastery-focus-btn",
+      type: "button",
+      role: "radio",
+      "data-mode": m.id,
+      text: m.label,
+      "aria-checked": mode === m.id ? "true" : "false",
+    });
+    if (mode === m.id) btn.classList.add("is-active");
+    btn.addEventListener("click", () => {
+      hapticLight();
+      if (m.id !== mode) {
+        booksExpanded = false;
+        genresExpanded = false;
+      }
+      renderLists(m.id);
+    });
+    modeButtons.push(btn);
+    modeBar.append(btn);
+  }
+
+  focus.append(modeBar, listsHost);
+  renderLists(mode);
+
+  return { map, focus };
 }
 
 function makeWordmark(): HTMLHeadingElement {
@@ -550,7 +1099,9 @@ function renderHome(): void {
     hapticLight();
     renderAchievements();
   });
-  screen.append(crown);
+  const topActions = el("div", { class: "home-top-actions" });
+  topActions.append(makeThemeToggle(), crown);
+  screen.append(topActions);
 
   const panel = el("div", { class: "home-panel" });
 
@@ -1738,6 +2289,7 @@ function makeInstallBanner(): HTMLElement | null {
 }
 
 async function main(): Promise<void> {
+  initTheme();
   try {
     await loadData();
   } catch (e) {
