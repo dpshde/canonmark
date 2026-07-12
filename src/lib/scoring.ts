@@ -22,6 +22,66 @@ export const CLOSE_BONUS = 350;
 /** Inclusive verse distance that still earns the close bonus. */
 export const CLOSE_DISTANCE = 5;
 
+/** ~average verses per chapter — shared with miss-display / rollup buckets. */
+export const VERSES_PER_CHAPTER = 26;
+
+/**
+ * Log-spaced effectiveDistance histogram edges (bucket starts).
+ * Aligns with display granularity: exact → close → verses → ~5/20/80 chapters → beyond.
+ */
+export const DIST_BUCKET_EDGES: readonly number[] = [
+  0,
+  1,
+  CLOSE_DISTANCE + 1,
+  20,
+  5 * VERSES_PER_CHAPTER,
+  20 * VERSES_PER_CHAPTER,
+  80 * VERSES_PER_CHAPTER,
+];
+
+/**
+ * Representative distance per bucket for median/avg merge after rollup.
+ * Midpoints of each band; last bucket uses ~2× the final edge.
+ */
+export const DIST_BUCKET_REPS: readonly number[] = [
+  0,
+  Math.round((1 + CLOSE_DISTANCE) / 2),
+  Math.round((CLOSE_DISTANCE + 1 + 19) / 2),
+  Math.round((20 + 5 * VERSES_PER_CHAPTER - 1) / 2),
+  Math.round((5 * VERSES_PER_CHAPTER + 20 * VERSES_PER_CHAPTER - 1) / 2),
+  Math.round((20 * VERSES_PER_CHAPTER + 80 * VERSES_PER_CHAPTER - 1) / 2),
+  80 * VERSES_PER_CHAPTER * 2,
+];
+
+export const DIST_BUCKET_COUNT = DIST_BUCKET_EDGES.length;
+
+/** Histogram bucket index for an effective miss distance. */
+export function bucketForDistance(d: number): number {
+  const dist = Math.max(0, Math.floor(Number(d) || 0));
+  for (let i = 0; i < DIST_BUCKET_EDGES.length; i++) {
+    const next = DIST_BUCKET_EDGES[i + 1];
+    if (next == null || dist < next) return i;
+  }
+  return DIST_BUCKET_EDGES.length - 1;
+}
+
+/**
+ * Guess inside truth range → 0; else min distance to either bound.
+ * Lives here so storage can fold without importing mastery.
+ */
+export function effectiveDistance(r: {
+  trueVerseIndex: number;
+  trueRangeEndVerseIndex: number;
+  guessVerseIndex: number;
+}): number {
+  const start = r.trueVerseIndex;
+  const end =
+    r.trueRangeEndVerseIndex >= start ? r.trueRangeEndVerseIndex : start;
+  const g = r.guessVerseIndex;
+  if (g >= start && g <= end) return 0;
+  return Math.min(Math.abs(g - start), Math.abs(g - end));
+}
+
 export function verseDistance(
   guessVerseIndex: number,
   trueVerseIndex: number

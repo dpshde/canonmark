@@ -13,6 +13,7 @@ import {
 } from "../src/lib/achievements";
 import {
   emptyLifetime,
+  emptyAppState,
   type AppState,
   type RoundRecord,
   type DailyResultRecord,
@@ -55,17 +56,11 @@ function practice(
 
 function state(partial: Partial<AppState>): AppState {
   return {
-    lastDaily: null,
-    history: [],
-    streak: 0,
-    bestStreak: 0,
-    practiceRounds: 0,
-    practiceLog: [],
-    lifetime: emptyLifetime(),
-    achievementUnlocks: {},
-    achievementsSeenAt: null,
-    installDismissedAt: null,
+    ...emptyAppState(),
     ...partial,
+    lifetime: partial.lifetime
+      ? { ...emptyLifetime(), ...partial.lifetime }
+      : emptyLifetime(),
   };
 }
 
@@ -126,18 +121,7 @@ describe("metal tiers", () => {
   });
 
   it("preload paths cover the seed catalog and listed rows", () => {
-    const state = {
-      lastDaily: null,
-      history: [],
-      streak: 0,
-      bestStreak: 0,
-      practiceRounds: 0,
-      practiceLog: [],
-      lifetime: emptyLifetime(),
-      achievementUnlocks: {},
-      achievementsSeenAt: null,
-      installDismissedAt: null,
-    } satisfies AppState;
+    const state = emptyAppState();
     const paths = dropCapPathsToPreload(state);
     expect(paths.length).toBeGreaterThanOrEqual(ACHIEVEMENT_CATALOG.length);
     expect(new Set(paths).size).toBe(paths.length);
