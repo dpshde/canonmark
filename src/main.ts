@@ -1244,7 +1244,7 @@ function setTranslation(next: TranslationId): void {
     });
 }
 
-/** Very quiet KJV / BSB switch beside the verse. */
+/** BSB / KJV segmented switch — same material as mastery focus. */
 function makeTranslationChip(): HTMLElement {
   const chip = el("div", {
     class: "translation-chip",
