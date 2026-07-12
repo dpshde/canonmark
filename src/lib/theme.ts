@@ -67,7 +67,7 @@ export function applyTheme(pref: ThemePreference = loadThemePreference()): void 
   if (meta) {
     meta.setAttribute(
       "content",
-      resolved === "dark" ? "#1c1916" : "#faf8f4"
+      resolved === "dark" ? "#0f0d0c" : "#faf8f4"
     );
   }
 

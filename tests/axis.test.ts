@@ -11,6 +11,9 @@ import {
   panViewport,
   scrubRampMultiplier,
   scrubVersesPerSecond,
+  pinchZoomFactor,
+  coastVelocityAfter,
+  edgeZoneFraction,
   bookSegments,
   bookSegmentAtT,
   testamentSeamT,
@@ -133,21 +136,23 @@ describe("placement math", () => {
   });
 
   it("edge scrub accelerates through smooth fast-forward tiers", () => {
-    const holds = [0, 650, 1350, 2200, 3200, 4500];
+    const holds = [0, 350, 800, 1400, 2100, 3000, 4000];
     const multipliers = holds.map(scrubRampMultiplier);
     const precisionSpeeds = holds.map((hold) =>
       scrubVersesPerSecond(80, hold)
     );
 
-    expect(multipliers).toEqual([1, 1, 2.5, 7, 18, 80]);
-    expect(precisionSpeeds[0]).toBe(3);
-    expect(precisionSpeeds[precisionSpeeds.length - 1]).toBe(240);
+    expect(multipliers).toEqual([1, 1, 4, 14, 45, 120, 280]);
+    expect(precisionSpeeds[0]).toBe(12);
+    expect(precisionSpeeds[precisionSpeeds.length - 1]).toBe(3360);
     for (let i = 2; i < precisionSpeeds.length; i += 1) {
       expect(precisionSpeeds[i]).toBeGreaterThan(precisionSpeeds[i - 1]);
     }
     expect(scrubVersesPerSecond(2600, 0)).toBeGreaterThan(
       precisionSpeeds[0]
     );
+    // Held edge in precision can leave the local book quickly.
+    expect(scrubVersesPerSecond(150, 4000)).toBeGreaterThanOrEqual(3000);
   });
 
   it("testament seam after Malachi", () => {
@@ -251,5 +256,28 @@ describe("zoom presets", () => {
     const full = viewportFullCanon(zoomed);
     expect(full.span).toBe(FULL_CANON_SPAN);
     expect(full.center).toBe((TOTAL_VERSES + 1) / 2);
+  });
+});
+
+describe("mobile gesture helpers", () => {
+  it("pinchZoomFactor maps finger distance to zoom factor", () => {
+    expect(pinchZoomFactor(100, 200)).toBe(2);
+    expect(pinchZoomFactor(100, 50)).toBe(0.5);
+    expect(pinchZoomFactor(0, 100)).toBe(1);
+    expect(pinchZoomFactor(10, 1000)).toBe(4);
+  });
+
+  it("coastVelocityAfter decays and settles to zero", () => {
+    const next = coastVelocityAfter(0.2, 16);
+    expect(next).toBeGreaterThan(0);
+    expect(next).toBeLessThan(0.2);
+    expect(coastVelocityAfter(0.001, 40)).toBe(0);
+    expect(coastVelocityAfter(-0.2, 8)).toBeLessThan(0);
+  });
+
+  it("edgeZoneFraction tightens after place / in precision", () => {
+    expect(edgeZoneFraction({ precision: false, hasMarker: false })).toBe(0.22);
+    expect(edgeZoneFraction({ precision: false, hasMarker: true })).toBe(0.18);
+    expect(edgeZoneFraction({ precision: true, hasMarker: true })).toBe(0.14);
   });
 });

@@ -21,24 +21,24 @@ colors:
   heat-close: "oklch(0.84 0.055 145)"
   heat-far: "oklch(0.48 0.175 40)"
 colorsDark:
-  bg: "oklch(0.18 0.01 50)"
-  surface: "oklch(0.22 0.012 50)"
-  surface-2: "oklch(0.28 0.014 50)"
-  rail: "oklch(0.32 0.012 50)"
-  ink: "oklch(0.92 0.008 50)"
-  ink-2: "oklch(0.74 0.01 50)"
-  ink-3: "oklch(0.58 0.01 50)"
-  accent: "oklch(0.70 0.14 40)"
-  accent-deep: "oklch(0.78 0.12 40)"
-  accent-soft: "oklch(0.30 0.05 40)"
-  border: "oklch(0.34 0.012 50)"
-  border-strong: "oklch(0.42 0.014 50)"
-  row-rule: "oklch(0.30 0.01 50)"
-  shadow: "oklch(0 0 0 / 0.35)"
-  success: "oklch(0.68 0.10 145)"
-  error: "oklch(0.68 0.12 25)"
-  heat-close: "oklch(0.55 0.08 145)"
-  heat-far: "oklch(0.62 0.16 40)"
+  bg: "oklch(0.16 0.004 48)"
+  surface: "oklch(0.20 0.005 48)"
+  surface-2: "oklch(0.25 0.006 48)"
+  rail: "oklch(0.28 0.006 48)"
+  ink: "oklch(0.93 0.006 55)"
+  ink-2: "oklch(0.72 0.008 50)"
+  ink-3: "oklch(0.55 0.008 50)"
+  accent: "oklch(0.64 0.145 38)"
+  accent-deep: "oklch(0.78 0.11 42)"
+  accent-soft: "oklch(0.27 0.04 38)"
+  border: "oklch(0.32 0.006 48)"
+  border-strong: "oklch(0.40 0.008 48)"
+  row-rule: "oklch(0.28 0.005 48)"
+  shadow: "oklch(0 0 0 / 0.5)"
+  success: "oklch(0.70 0.09 148)"
+  error: "oklch(0.68 0.12 22)"
+  heat-close: "oklch(0.48 0.07 148)"
+  heat-far: "oklch(0.58 0.14 38)"
 typography:
   display:
     fontFamily: "Charter, Bitstream Charter, Sitka Text, Cambria, Georgia, serif"
@@ -155,7 +155,7 @@ The achievements screen is the reference for secondary UI: Lifetime → Canon ma
 
 Preference cycles **System → Light → Dark** (`data-theme` on `<html>`; System leaves the attribute off so `prefers-color-scheme` wins). Theme changes must **not remount screens** — flip tokens, sync the toggle icon, and repaint only non-CSS surfaces (canvas strip, mastery heat).
 
-Dark keeps the same warm hue (~50) with inverted luminance: near-black page, elevated surfaces, brighter terracotta for contrast. Genre and heat tokens have dark counterparts.
+Dark is lamp-lit ink: near-black neutrals with almost no warm mud, ember terracotta for action, saturated genre bands on a charcoal rail. Warmth stays in type + accent — not a brown page wash.
 
 Toggle chrome clusters with other top-bar actions (home: theme left of crown; achievements: theme left of home), top-right, ghost ink.
 
@@ -176,9 +176,7 @@ Toggle chrome clusters with other top-bar actions (home: theme left of crown; ac
 
 ### Dark
 
-Same roles; see frontmatter `colorsDark`. Accent lightens; surfaces step up from `bg`; borders stay visible without neon.
-
-Genre tints on the play timeline stay whisper-level in light, muted midtones in dark — never cartoon blocks.
+Near-black page (low chroma — not muddy brown). Surfaces step up cleanly. Accent is ember terracotta (richer, less peach). Genre bands keep clear hue identity on a charcoal rail — readable orientation, not cartoon neon.
 
 ## Typography
 

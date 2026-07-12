@@ -127,7 +127,7 @@ describe("applyTheme", () => {
     stubScheme(true);
     applyTheme("dark");
     const meta = document.querySelector('meta[name="theme-color"]');
-    expect(meta?.getAttribute("content")).toBe("#1c1916");
+    expect(meta?.getAttribute("content")).toBe("#0f0d0c");
   });
 });
 

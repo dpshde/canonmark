@@ -1297,7 +1297,6 @@ function renderPlay(): void {
     "aria-describedby": "timeline-instructions",
   });
   board.append(canvas);
-  screen.append(board);
 
   const hud = el("div", { class: "hud" });
 
@@ -1370,12 +1369,11 @@ function renderPlay(): void {
   verseBand.append(card);
   hud.append(verseBand);
 
-  /* Transparent mid — hits pass through to the board */
+  /* Mid row: board fills the free band between verse and dock */
   const hudMid = el("div", { class: "hud-mid" });
-  const cueText =
-    provisionalGuess == null
-      ? "Place roughly on the timeline, then refine"
-      : "Refine on the notches, then Confirm";
+  hudMid.append(board);
+  // Visual cue only during rough place; refine uses notches + dock Confirm.
+  const cueHidden = provisionalGuess != null;
   hudMid.append(
     el("p", {
       class: "sr-only",
@@ -1383,10 +1381,10 @@ function renderPlay(): void {
       text: "Place a marker roughly on the canon timeline. The view zooms in so you can refine with verse notches. Or type a Bible reference. Arrow keys move one verse, Shift plus arrow moves ten, Enter confirms.",
     }),
     el("p", {
-      class: `timeline-cue${provisionalGuess == null ? "" : " is-refine"}`,
+      class: `timeline-cue${cueHidden ? " is-refine is-hidden" : ""}`,
       id: "timeline-cue",
       "aria-hidden": "true",
-      text: cueText,
+      text: cueHidden ? "" : "Rough placement",
     })
   );
   hud.append(hudMid);
@@ -1399,8 +1397,9 @@ function renderPlay(): void {
   if (hintPanel) dock.append(hintPanel);
 
   if (round.phase === "playing") {
-    // Type field always available; zoom/hint still wait for a marker.
+    // Type field appears after a marker (rough → refine); zoom/hint same.
     const guessTools = el("div", { class: "guess-tools" });
+    if (!hasMarker) guessTools.hidden = true;
     guessTools.append(makePrecisionZoomOut(), makeGuessInput());
     dock.append(guessTools);
 
@@ -1493,6 +1492,8 @@ function renderPlay(): void {
     syncPlayStage();
     const zoomBar = document.querySelector<HTMLElement>(".zoom-bar");
     if (zoomBar) syncZoomBarUI(zoomBar);
+    // Verse may grow when the place-phase clamp lifts — remeasure free band.
+    requestAnimationFrame(() => syncChromeInsets());
   });
   strip.setOnGuessCommit(() => {
     document.querySelector<HTMLButtonElement>("#btn-confirm")?.click();
@@ -1511,49 +1512,27 @@ function renderPlay(): void {
     strip.setProvisionalGuess(provisionalGuess);
   }
 
-  /* Keep the rail centered in the free band as chrome resizes */
-  chromeRo = new ResizeObserver(() => syncChromeInsets());
-  chromeRo.observe(hud);
+  /* Board is laid out by the HUD mid row — resize + publish rail-cross. */
+  chromeRo = new ResizeObserver(() => {
+    syncChromeInsets();
+  });
   chromeRo.observe(board);
+  chromeRo.observe(hudMid);
   requestAnimationFrame(() => syncChromeInsets());
 }
 
-/** Measure HUD chrome and offset the canvas rail into the free board band. */
+/**
+ * Keep wide guess-tools anchored under the rail. Board layout still comes
+ * from the HUD mid row — this only publishes --rail-cross for CSS.
+ */
 function syncChromeInsets(): void {
-  if (!strip) return;
+  strip?.resize();
   const board = document.querySelector(".board-wrap");
-  const chrome = document.querySelector(".hud-chrome");
-  const topBar = document.querySelector(".top-bar");
-  const verseBand = document.querySelector(".verse-band");
-  const dock = document.querySelector(".dock");
-  if (!board) return;
-
+  const hud = document.querySelector<HTMLElement>(".hud");
+  if (!board || !hud) return;
   const br = board.getBoundingClientRect();
-  // Free band starts below the verse (which sits under top chrome + install).
-  const topEdge = verseBand
-    ? verseBand.getBoundingClientRect().bottom
-    : chrome
-      ? chrome.getBoundingClientRect().bottom
-      : topBar
-        ? topBar.getBoundingClientRect().bottom
-        : br.top;
-  const bottomEdge = dock ? dock.getBoundingClientRect().top : br.bottom;
-
-  /* Extra room so marker labels (~24px) clear the chrome gradients */
-  const topGap = 16;
-  const bottomGap = 16;
-  const topInset = Math.max(0, topEdge - br.top + topGap);
-  const bottomInset = Math.max(0, br.bottom - bottomEdge + bottomGap);
-  strip.setChromeInsets({
-    top: topInset,
-    bottom: bottomInset,
-    start: 0,
-    end: 0,
-  });
-  const railCross = topInset + Math.max(48, br.height - topInset - bottomInset) * 0.5;
-  document
-    .querySelector<HTMLElement>(".hud")
-    ?.style.setProperty("--rail-cross", `${railCross}px`);
+  const railCross = br.top + br.height * 0.5;
+  hud.style.setProperty("--rail-cross", `${railCross}px`);
 }
 
 function makeGuessInput(): HTMLElement {
@@ -1810,16 +1789,17 @@ function syncTimelineCue(): void {
   const cue = document.querySelector("#timeline-cue");
   if (!cue) return;
   if (provisionalGuess == null) {
-    cue.textContent = "Place roughly on the timeline, then refine";
+    cue.textContent = "Rough placement";
     cue.classList.remove("is-hidden", "is-refine");
     return;
   }
-  cue.textContent = "Refine on the notches, then Confirm";
-  cue.classList.add("is-refine");
-  cue.classList.remove("is-hidden");
+  // Precision view owns the right of the rail (notches + chapter labels).
+  // Dock already shows the guess + Confirm — drop the floating cue.
+  cue.textContent = "";
+  cue.classList.add("is-hidden", "is-refine");
 }
 
-/** Progressive disclosure: zoom + hint after a marker (type field always on). */
+/** Progressive disclosure: zoom + hint + type field after a marker. */
 function syncPlayStage(): void {
   const hud = document.querySelector<HTMLElement>(".hud");
   if (!hud) return;
@@ -1829,6 +1809,10 @@ function syncPlayStage(): void {
   if (hintBtn) {
     hintBtn.hidden = !hasMarker;
     hintBtn.tabIndex = hasMarker ? 0 : -1;
+  }
+  const guessTools = document.querySelector<HTMLElement>(".guess-tools");
+  if (guessTools) {
+    guessTools.hidden = !hasMarker;
   }
 }
 
@@ -2114,10 +2098,7 @@ function makeZoomBar(): HTMLElement {
     "aria-label": "Timeline zoom",
   });
   // Note: BSB | KJV is a sibling after this bar in .top-center (not inside).
-  ZOOM_PRESETS.forEach((p, i) => {
-    if (i > 0) {
-      bar.append(el("span", { class: "zoom-sep", "aria-hidden": "true", text: "·" }));
-    }
+  for (const p of ZOOM_PRESETS) {
     const btn = el("button", {
       class: `zoom-link${activeZoom === p.id ? " is-active" : ""}`,
       type: "button",
@@ -2140,7 +2121,7 @@ function makeZoomBar(): HTMLElement {
       syncZoomBarUI(bar);
     });
     bar.append(btn);
-  });
+  }
   return bar;
 }
 

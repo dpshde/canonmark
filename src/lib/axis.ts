@@ -201,6 +201,46 @@ export function zoomViewport(
   });
 }
 
+/**
+ * Pinch zoom factor from finger-distance ratio (current / start).
+ * Clamped so a single gesture can't jump past full-canon or verse-level.
+ */
+export function pinchZoomFactor(
+  startDist: number,
+  currentDist: number
+): number {
+  if (!(startDist > 0) || !(currentDist > 0)) return 1;
+  return Math.min(4, Math.max(0.25, currentDist / startDist));
+}
+
+/**
+ * Decay coast velocity (verses per ms) over one frame.
+ * Friction is constant deceleration so short flicks settle quickly.
+ */
+export function coastVelocityAfter(
+  velocity: number,
+  dtMs: number,
+  frictionPerMs = 0.0035
+): number {
+  if (velocity === 0 || dtMs <= 0) return 0;
+  const sign = Math.sign(velocity);
+  const next = Math.abs(velocity) - frictionPerMs * dtMs;
+  return next <= 0 ? 0 : sign * next;
+}
+
+/**
+ * Edge auto-pan zone as a fraction of axis length.
+ * Precision / post-place use a tighter zone so more of the rail is scrubbable.
+ */
+export function edgeZoneFraction(opts: {
+  precision: boolean;
+  hasMarker: boolean;
+}): number {
+  if (opts.precision) return 0.14;
+  if (opts.hasMarker) return 0.18;
+  return 0.22;
+}
+
 export function panViewport(
   viewport: Viewport,
   deltaVerses: number
@@ -213,11 +253,12 @@ export function panViewport(
 
 const SCRUB_RAMP_POINTS = [
   { holdMs: 0, multiplier: 1 },
-  { holdMs: 650, multiplier: 1 },
-  { holdMs: 1350, multiplier: 2.5 },
-  { holdMs: 2200, multiplier: 7 },
-  { holdMs: 3200, multiplier: 18 },
-  { holdMs: 4500, multiplier: 80 },
+  { holdMs: 350, multiplier: 1 },
+  { holdMs: 800, multiplier: 4 },
+  { holdMs: 1400, multiplier: 14 },
+  { holdMs: 2100, multiplier: 45 },
+  { holdMs: 3000, multiplier: 120 },
+  { holdMs: 4000, multiplier: 280 },
 ] as const;
 
 /** Smooth, staged acceleration for a held edge-scrub gesture. */
@@ -238,12 +279,20 @@ export function scrubRampMultiplier(holdMs: number): number {
   return SCRUB_RAMP_POINTS[SCRUB_RAMP_POINTS.length - 1].multiplier;
 }
 
-/** Verse velocity for edge scrubbing at the current zoom scale. */
+/**
+ * Verse velocity for edge scrubbing at the current zoom scale.
+ * Starts gentle for verse-level control, then ramps hard so a held
+ * edge can traverse the canon quickly (especially on touch).
+ */
 export function scrubVersesPerSecond(span: number, holdMs: number): number {
   const safeSpan = Math.max(1, span);
-  const precision = safeSpan <= 120;
-  const base = precision ? 3 : Math.max(20, safeSpan * 0.04);
-  const cap = precision ? 240 : Math.max(200, safeSpan * 1.25);
+  // Align with strip PRECISION_THRESHOLD (~180): close-up needs a high
+  // ceiling so edge-hold can escape to distant books.
+  const precision = safeSpan <= 180;
+  const base = precision ? 12 : Math.max(32, safeSpan * 0.06);
+  const cap = precision
+    ? 4000
+    : Math.max(1600, safeSpan * 3);
   return Math.min(cap, base * scrubRampMultiplier(holdMs));
 }
 

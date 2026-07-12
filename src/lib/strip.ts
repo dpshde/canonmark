@@ -19,6 +19,10 @@ import {
   panViewport,
   scrubVersesPerSecond,
   zoomViewport,
+  pinchZoomFactor,
+  coastVelocityAfter,
+  edgeZoneFraction,
+  clampViewportToCanon,
   viewportForZoomPreset,
   viewportForPrecision,
   viewportForRange,
@@ -56,12 +60,12 @@ const FALLBACK = {
   rail: "#e8e4de",
   bg: "#faf8f4",
   genre: {
-    law: "#c5d6b8",
-    history: "#e8d4a4",
-    poetry: "#d4c4e6",
-    prophets: "#e8c49a",
-    gospels: "#edd08c",
-    epistles: "#b8d4c4",
+    law: "#7fbf7a",
+    history: "#c4844a",
+    poetry: "#a88fd4",
+    prophets: "#d4724a",
+    gospels: "#d4898a",
+    epistles: "#5fafa8",
   } as Record<string, string>,
 };
 
@@ -149,6 +153,20 @@ export class CanonStrip {
   private lastAxis = 0;
   private hoverVerse: number | null = null;
   private activePointerType: string | null = null;
+  /** Live pointer positions for pinch (pointerId → client coords + axis). */
+  private pointers = new Map<
+    number,
+    { clientX: number; clientY: number; axis: number }
+  >();
+  private pinching = false;
+  private pinchStartDist = 0;
+  private pinchStartSpan = 0;
+  private pinchFocusVerse = 1;
+  /** Recent axis samples for flick / coast velocity (ms, axisPx). */
+  private moveSamples: Array<{ t: number; axis: number }> = [];
+  private coastRaf = 0;
+  private coastVelocity = 0;
+  private coastLastFrame = 0;
   private onGuessChange: ((ch: number | null) => void) | null = null;
   private onGuessCommit: (() => void) | null = null;
   private onFreeViewChange: (() => void) | null = null;
@@ -169,12 +187,6 @@ export class CanonStrip {
   /** Result-page YOU/TRUE chip boxes for DOM link overlays. */
   private resultLinkHits: ResultLinkHit[] = [];
   private linkLayer: HTMLDivElement | null = null;
-
-  /**
-   * Fraction of the axis length that counts as an edge zone (top/bottom or
-   * left/right). Dragging inside this band auto-scrolls the timeline.
-   */
-  private static readonly EDGE_ZONE_FRAC = 0.25;
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     const ctx = canvas.getContext("2d");
@@ -267,7 +279,26 @@ export class CanonStrip {
 
   setProvisionalGuess(ch: number | null): void {
     this.stopViewportAnimation();
+    this.stopCoast();
     this.state.provisionalGuess = ch == null ? null : clampVerse(ch);
+    // Keyboard / programmatic jumps: keep the marker inside the precision window.
+    if (
+      this.state.provisionalGuess != null &&
+      this.isPrecisionView() &&
+      !this.placing &&
+      !this.dragging
+    ) {
+      const half = this.state.viewport.span / 2;
+      const lo = this.state.viewport.center - half;
+      const hi = this.state.viewport.center + half;
+      const v = this.state.provisionalGuess;
+      if (v < lo + 4 || v > hi - 4) {
+        this.state.viewport = clampViewportToCanon({
+          ...this.state.viewport,
+          center: v,
+        });
+      }
+    }
     this.syncAccessibility();
     this.onGuessChange?.(this.state.provisionalGuess);
     this.render();
@@ -379,21 +410,30 @@ export class CanonStrip {
 
   /** Ease the viewport toward a target (span + center). Snaps under reduced motion. */
   private animateToViewport(target: Viewport): void {
-    const from = this.state.viewport;
+    const fromSpan = this.state.viewport.span;
+    const fromCenter = this.state.viewport.center;
     this.stopViewportAnimation();
 
     if (
-      Math.abs(from.span - target.span) < 1 &&
-      Math.abs(from.center - target.center) < 0.5
+      Math.abs(fromSpan - target.span) < 1 &&
+      Math.abs(fromCenter - target.center) < 0.5
     ) {
-      this.state.viewport = target;
+      this.state.viewport = {
+        ...this.state.viewport,
+        center: target.center,
+        span: target.span,
+      };
       this.onFreeViewChange?.();
       this.render();
       return;
     }
 
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      this.state.viewport = target;
+      this.state.viewport = {
+        ...this.state.viewport,
+        center: target.center,
+        span: target.span,
+      };
       this.onFreeViewChange?.();
       this.render();
       return;
@@ -403,16 +443,21 @@ export class CanonStrip {
     const tick = (now: number): void => {
       const raw = Math.min(1, (now - started) / PRECISION_ZOOM_MS);
       const eased = easeOutCubic(raw);
+      // Keep live axisPx/crossPx from resize; only tween span + center.
       this.state.viewport = {
-        ...from,
-        center: from.center + (target.center - from.center) * eased,
-        span: from.span + (target.span - from.span) * eased,
+        ...this.state.viewport,
+        center: fromCenter + (target.center - fromCenter) * eased,
+        span: fromSpan + (target.span - fromSpan) * eased,
       };
       this.render();
       if (raw < 1) {
         this.viewportAnimFrame = requestAnimationFrame(tick);
       } else {
-        this.state.viewport = target;
+        this.state.viewport = {
+          ...this.state.viewport,
+          center: target.center,
+          span: target.span,
+        };
         this.viewportAnimFrame = 0;
         this.onFreeViewChange?.();
         this.render();
@@ -427,25 +472,42 @@ export class CanonStrip {
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(this.canvas.parentElement ?? this.canvas);
 
-    /** Axis coord in free-band space (0…axisPx), not full canvas. */
+    /** Axis coord in content-band space (0…axisPx), not full canvas. */
     const axisCoord = (e: PointerEvent): number => {
       const rect = this.canvas.getBoundingClientRect();
-      const free = this.freeAxis();
+      const band = this.contentAxis();
       const raw =
         this.state.viewport.orientation === "vertical"
           ? e.clientY - rect.top
           : e.clientX - rect.left;
-      return Math.min(free.length, Math.max(0, raw - free.origin));
+      return Math.min(band.length, Math.max(0, raw - band.origin));
     };
 
-    const endGesture = (): void => {
+    const rememberPointer = (e: PointerEvent): void => {
+      this.pointers.set(e.pointerId, {
+        clientX: e.clientX,
+        clientY: e.clientY,
+        axis: axisCoord(e),
+      });
+    };
+
+    const endGesture = (opts?: { coast?: boolean }): void => {
+      const shouldCoast = opts?.coast === true;
+      const coastV = shouldCoast ? this.sampleCoastVelocity() : 0;
       this.dragging = false;
       this.placing = false;
       this.panning = false;
       this.activePointerType = null;
+      this.pinching = false;
+      this.pinchStartDist = 0;
+      this.moveSamples = [];
       this.canvas.classList.remove("is-placing");
       this.stopEdgeScroll();
-      this.render();
+      if (shouldCoast && Math.abs(coastV) > 0.008) {
+        this.startCoast(coastV);
+      } else {
+        this.render();
+      }
     };
 
     /*
@@ -453,17 +515,31 @@ export class CanonStrip {
      * - Playing: finger owns the marker (tap or drag to place/adjust).
      *   Scroll only when the finger sits in an edge zone so the pointer
      *   would otherwise leave the visible span (edge auto-pan).
+     * - Two fingers: pinch zoom around the midpoint verse.
      * - Revealed: free drag pans the timeline.
      */
     this.canvas.addEventListener("pointerdown", (e) => {
-      if (e.isPrimary === false) return;
+      rememberPointer(e);
+      this.stopCoast();
       this.stopViewportAnimation();
-      this.canvas.setPointerCapture(e.pointerId);
+      try {
+        this.canvas.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore capture failures on some browsers */
+      }
+
+      if (this.pointers.size >= 2 && !this.state.revealed) {
+        this.beginPinch();
+        return;
+      }
+
+      if (e.isPrimary === false) return;
       this.canvas.focus({ preventScroll: true });
       this.dragging = true;
       this.hoverVerse = null;
       this.activePointerType = e.pointerType;
       this.lastAxis = axisCoord(e);
+      this.moveSamples = [{ t: performance.now(), axis: this.lastAxis }];
 
       if (!this.state.revealed) {
         this.placing = true;
@@ -481,6 +557,15 @@ export class CanonStrip {
     });
 
     this.canvas.addEventListener("pointermove", (e) => {
+      if (this.pointers.has(e.pointerId)) {
+        rememberPointer(e);
+      }
+
+      if (this.pinching && this.pointers.size >= 2) {
+        this.applyPinch();
+        return;
+      }
+
       const axis = axisCoord(e);
       if (!this.dragging) {
         if (!this.state.revealed && e.pointerType !== "touch") {
@@ -494,6 +579,7 @@ export class CanonStrip {
       }
       const deltaPx = axis - this.lastAxis;
       this.lastAxis = axis;
+      this.recordMoveSample(axis);
 
       if (this.panning) {
         const cpp = this.state.viewport.span / this.state.viewport.axisPx;
@@ -519,25 +605,54 @@ export class CanonStrip {
       }
     });
 
-    this.canvas.addEventListener("pointerup", () => {
+    this.canvas.addEventListener("pointerup", (e) => {
+      this.pointers.delete(e.pointerId);
+      if (this.pinching) {
+        if (this.pointers.size < 2) {
+          this.pinching = false;
+          this.pinchStartDist = 0;
+          // Resume single-finger place if one finger remains.
+          if (this.pointers.size === 1 && !this.state.revealed) {
+            const remaining = [...this.pointers.values()][0];
+            this.dragging = true;
+            this.placing = true;
+            this.panning = false;
+            this.activePointerType = "touch";
+            this.lastAxis = remaining.axis;
+            this.canvas.classList.add("is-placing");
+            this.startEdgeScroll();
+          }
+        }
+        this.onFreeViewChange?.();
+        this.render();
+        return;
+      }
+
       const shouldAutoZoom =
         !this.state.revealed &&
         this.placing &&
         this.state.provisionalGuess != null &&
         this.state.viewport.span > PRECISION_THRESHOLD;
+      const shouldCoast =
+        !this.state.revealed &&
+        this.placing &&
+        this.isPrecisionView() &&
+        this.activePointerType === "touch";
       const focus = this.state.provisionalGuess;
-      endGesture();
+      endGesture({ coast: shouldCoast && !shouldAutoZoom });
       if (shouldAutoZoom && focus != null) {
         this.autoZoomForPrecision(focus);
       }
     });
 
-    this.canvas.addEventListener("pointercancel", () => {
+    this.canvas.addEventListener("pointercancel", (e) => {
+      this.pointers.delete(e.pointerId);
+      this.pinching = false;
       endGesture();
     });
 
     this.canvas.addEventListener("pointerleave", () => {
-      if (this.dragging) return;
+      if (this.dragging || this.pinching) return;
       this.hoverVerse = null;
       this.render();
     });
@@ -573,6 +688,7 @@ export class CanonStrip {
       (e) => {
         e.preventDefault();
         this.stopViewportAnimation();
+        this.stopCoast();
         const factor = e.deltaY > 0 ? 0.9 : 1.1;
         const focus = this.state.provisionalGuess ?? this.state.viewport.center;
         this.state.viewport = zoomViewport(this.state.viewport, factor, focus);
@@ -585,6 +701,7 @@ export class CanonStrip {
     window.addEventListener("resize", () => {
       const o = this.detectOrientation();
       if (o !== this.state.viewport.orientation) {
+        this.stopViewportAnimation();
         const prev = this.state.viewport.orientation;
         // Adopting a new default span only when leaving/entering portrait
         // from a default-like zoom, so user zooms aren't clobbered mid-play.
@@ -600,8 +717,131 @@ export class CanonStrip {
             : this.state.viewport.span,
         };
         this.resize();
+      } else {
+        this.resize();
       }
     });
+  }
+
+  private beginPinch(): void {
+    if (this.pointers.size < 2) return;
+    this.stopEdgeScroll();
+    this.stopCoast();
+    this.dragging = false;
+    this.placing = false;
+    this.panning = false;
+    this.pinching = true;
+    this.canvas.classList.remove("is-placing");
+    const [a, b] = [...this.pointers.values()];
+    this.pinchStartDist = Math.hypot(
+      b.clientX - a.clientX,
+      b.clientY - a.clientY
+    );
+    this.pinchStartSpan = this.state.viewport.span;
+    const midAxis = (a.axis + b.axis) / 2;
+    this.pinchFocusVerse = hitTestVerse(midAxis, this.state.viewport).verseIndex;
+  }
+
+  private applyPinch(): void {
+    if (this.pointers.size < 2 || this.pinchStartDist <= 0) return;
+    const [a, b] = [...this.pointers.values()];
+    const dist = Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+    const factor = pinchZoomFactor(this.pinchStartDist, dist);
+    // factor > 1 → fingers apart → zoom in (smaller span)
+    const nextSpan = Math.min(
+      FULL_CANON_SPAN,
+      Math.max(20, this.pinchStartSpan / factor)
+    );
+    this.state.viewport = clampViewportToCanon({
+      ...this.state.viewport,
+      center: this.pinchFocusVerse,
+      span: nextSpan,
+    });
+    this.render();
+  }
+
+  private recordMoveSample(axis: number): void {
+    const t = performance.now();
+    this.moveSamples.push({ t, axis });
+    while (this.moveSamples.length > 6) this.moveSamples.shift();
+    while (
+      this.moveSamples.length > 2 &&
+      t - this.moveSamples[0].t > 80
+    ) {
+      this.moveSamples.shift();
+    }
+  }
+
+  /** Verses/ms from recent drag samples (precision flick). */
+  private sampleCoastVelocity(): number {
+    if (this.moveSamples.length < 2) return 0;
+    const first = this.moveSamples[0];
+    const last = this.moveSamples[this.moveSamples.length - 1];
+    const dt = last.t - first.t;
+    if (dt < 12) return 0;
+    const cpp = this.state.viewport.span / Math.max(1, this.state.viewport.axisPx);
+    // Finger down the rail → positive axis → toward Revelation
+    return ((last.axis - first.axis) * cpp) / dt;
+  }
+
+  private startCoast(velocity: number): void {
+    this.stopCoast();
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      this.render();
+      return;
+    }
+    this.coastVelocity = velocity;
+    this.coastLastFrame = performance.now();
+    const tick = (now: number): void => {
+      if (this.dragging || this.pinching) {
+        this.coastRaf = 0;
+        return;
+      }
+      const dt = Math.min(40, Math.max(0, now - this.coastLastFrame));
+      this.coastLastFrame = now;
+      this.coastVelocity = coastVelocityAfter(this.coastVelocity, dt);
+      if (Math.abs(this.coastVelocity) < 0.002) {
+        this.coastRaf = 0;
+        this.coastVelocity = 0;
+        // Snap to nearest verse after coast
+        if (this.state.provisionalGuess != null) {
+          this.setProvisionalGuess(this.state.provisionalGuess);
+        } else {
+          this.render();
+        }
+        return;
+      }
+      const deltaVerses = this.coastVelocity * dt;
+      if (this.state.provisionalGuess != null && !this.state.revealed) {
+        const next = clampVerse(this.state.provisionalGuess + deltaVerses);
+        if (next !== this.state.provisionalGuess) {
+          hapticSelection();
+          this.state.provisionalGuess = next;
+          this.syncAccessibility();
+          this.onGuessChange?.(next);
+        }
+        // Keep the precision window centered on the coasting marker
+        if (this.isPrecisionView()) {
+          this.state.viewport = {
+            ...this.state.viewport,
+            center: next,
+          };
+        }
+      } else {
+        this.state.viewport = panViewport(this.state.viewport, deltaVerses);
+      }
+      this.render();
+      this.coastRaf = requestAnimationFrame(tick);
+    };
+    this.coastRaf = requestAnimationFrame(tick);
+  }
+
+  private stopCoast(): void {
+    if (this.coastRaf) {
+      cancelAnimationFrame(this.coastRaf);
+      this.coastRaf = 0;
+    }
+    this.coastVelocity = 0;
   }
 
   /** Continuous edge auto-scroll while holding the finger in a rim zone. */
@@ -651,7 +891,7 @@ export class CanonStrip {
   }
 
   /**
-   * If the pointer is in the top/bottom (or start/end) 25% of the axis,
+   * If the pointer is in the top/bottom (or start/end) edge zone of the axis,
    * pan the viewport so the drag can continue past the current view.
    * Then re-hit-test so the marker stays under the finger.
    */
@@ -666,8 +906,12 @@ export class CanonStrip {
       return;
     }
 
-    // 25% top + 25% bottom (middle 50% is pure pointer, no scroll)
-    const zone = axisPx * CanonStrip.EDGE_ZONE_FRAC;
+    const zone =
+      axisPx *
+      edgeZoneFraction({
+        precision: this.isPrecisionView(),
+        hasMarker: this.state.provisionalGuess != null,
+      });
     let dir = 0; // -1 toward Genesis, +1 toward Revelation
     let intensity = 0;
 
@@ -724,7 +968,8 @@ export class CanonStrip {
   }
 
   resize(): void {
-    this.stopViewportAnimation();
+    // Do not cancel viewport animations here — showing guess tools / verse reflow
+    // resizes the mid-row board and must not abort autoZoomForPrecision.
     const parent = this.canvas.parentElement ?? this.canvas;
     const w = parent.clientWidth || 320;
     const h = parent.clientHeight || 200;
@@ -749,15 +994,15 @@ export class CanonStrip {
   }
 
   /**
-   * Keep viewport.axisPx / crossPx aligned with the free band between
-   * header/footer chrome so markers never live under the HUD.
+   * Keep viewport.axisPx / crossPx aligned with the content band so
+   * markers stay clear of the soft edge fades.
    */
   private syncViewportMetrics(): void {
     const o = this.state.viewport.orientation;
-    const free = this.freeAxis();
+    const band = this.contentAxis();
     this.state.viewport = {
       ...this.state.viewport,
-      axisPx: free.length,
+      axisPx: band.length,
       crossPx: o === "vertical" ? this.canvasW : this.canvasH,
     };
   }
@@ -767,6 +1012,7 @@ export class CanonStrip {
     cancelAnimationFrame(this.animFrame);
     this.stopViewportAnimation();
     this.stopEdgeScroll();
+    this.stopCoast();
     this.clearResultLinks();
     this.linkLayer?.remove();
     this.linkLayer = null;
@@ -775,25 +1021,47 @@ export class CanonStrip {
   /* ———— Geometry ———— */
 
   /**
-   * Free band along the scroll axis, inset from header/footer (or side chrome).
-   * All hit-testing and marker placement live inside this band.
+   * Soft wash at canvas ends (pairs with HUD card gradients).
+   * Keep a thin free-band pad for the fade; content inset is minimal so
+   * the rail reads tall on mobile without sitting under the wash.
    */
+  private static readonly EDGE_FADE_PX = 18;
+  private static readonly MARKER_EDGE_CLEARANCE = 6;
+  private static readonly CONTENT_EDGE_INSET = 4;
+  private static readonly AXIS_EDGE_PAD =
+    CanonStrip.EDGE_FADE_PX + CanonStrip.MARKER_EDGE_CLEARANCE;
+
+  /** Outer free band — fades live in the margin outside this. */
   private freeAxis(): { origin: number; length: number } {
     const o = this.state.viewport.orientation;
+    const pad = CanonStrip.AXIS_EDGE_PAD;
     if (o === "vertical") {
-      const origin = this.chrome.top;
+      const origin = this.chrome.top + pad;
       const length = Math.max(
         48,
-        this.canvasH - this.chrome.top - this.chrome.bottom
+        this.canvasH - this.chrome.top - this.chrome.bottom - pad * 2
       );
       return { origin, length };
     }
-    const origin = this.chrome.start;
+    const origin = this.chrome.start + pad;
     const length = Math.max(
       48,
-      this.canvasW - this.chrome.start - this.chrome.end
+      this.canvasW - this.chrome.start - this.chrome.end - pad * 2
     );
     return { origin, length };
+  }
+
+  /**
+   * Inner band used for verse↔pixel mapping, rail, and markers.
+   * Inset from freeAxis so the selection never sits in the soft edge.
+   */
+  private contentAxis(): { origin: number; length: number } {
+    const free = this.freeAxis();
+    const inset = CanonStrip.CONTENT_EDGE_INSET;
+    return {
+      origin: free.origin + inset,
+      length: Math.max(48, free.length - inset * 2),
+    };
   }
 
   /**
@@ -811,14 +1079,23 @@ export class CanonStrip {
   }
 
   private railThick(): number {
-    return Math.max(8, Math.min(this.state.viewport.crossPx * 0.06, 16));
+    // Coarse pointers get a fatter visual rail (~48–64px hit corridor feel).
+    const coarse =
+      typeof window !== "undefined" &&
+      window.matchMedia("(pointer: coarse)").matches;
+    const max = coarse ? 22 : 16;
+    const min = coarse ? 12 : 8;
+    const frac = coarse ? 0.085 : 0.06;
+    return Math.max(min, Math.min(this.state.viewport.crossPx * frac, max));
   }
 
-  /** Verse → screen position on a straight rail (inside the free band). */
+  /** Verse → screen position on a straight rail (inside the content band). */
   private railPoint(ch: number, w: number, h: number): Point {
     const vp = this.state.viewport;
-    const free = this.freeAxis();
-    const axis = free.origin + verseToAxisPx(ch, vp);
+    const band = this.contentAxis();
+    const axis =
+      band.origin +
+      Math.min(band.length, Math.max(0, verseToAxisPx(ch, vp)));
     const cross = this.railCross(w, h);
     if (vp.orientation === "horizontal") {
       return { x: axis, y: cross };
@@ -855,15 +1132,22 @@ export class CanonStrip {
     this.resultLinkHits = [];
 
     this.drawBackground(w, h);
+    // Soft clip with label slack so end-of-band markers aren't cropped.
+    this.ctx.save();
+    this.clipToFreeBand(w, h, 12);
     // Always keep genre-tinted segments — they orient you on the close-up
     this.drawBookSegments(w, h);
-    // Result: keep seam + edge labels when visible for orientation.
+    // Result: keep seam when visible for orientation.
     // Book names stay off so marker labels aren't crowded.
     this.drawSeam(w, h);
-    this.drawEdgeLabels(w, h);
     if (!resultView) {
       this.drawBookLabels(w, h);
     }
+    this.ctx.restore();
+
+    // Soft fades into verse / dock chrome (pairs with the HUD card gradients).
+    // Painted before selection so the active marker never sits under the wash.
+    this.drawEdgeFades(w, h);
 
     if (resultView && this.state.trueVerse != null) {
       const guess = this.state.lockedGuess;
@@ -914,6 +1198,9 @@ export class CanonStrip {
     } else if (this.state.provisionalGuess != null) {
       const lifted = this.placing && this.activePointerType === "touch";
       this.drawGuessMarker(this.state.provisionalGuess, w, h, true, "above", lifted);
+      if (lifted) {
+        this.drawMagnifier(this.state.provisionalGuess, w, h);
+      }
     }
 
     if (
@@ -935,6 +1222,78 @@ export class CanonStrip {
     this.syncResultLinks();
   }
 
+  /**
+   * Clip drawing to the free band, with optional slack so marker labels at the
+   * band edge aren't hard-cropped.
+   */
+  private clipToFreeBand(w: number, h: number, slack = 0): void {
+    const free = this.freeAxis();
+    const { ctx } = this;
+    ctx.beginPath();
+    if (this.state.viewport.orientation === "vertical") {
+      ctx.rect(0, free.origin - slack, w, free.length + slack * 2);
+    } else {
+      ctx.rect(free.origin - slack, 0, free.length + slack * 2, h);
+    }
+    ctx.clip();
+  }
+
+  /**
+   * Soft fades at the canvas edges so the rail eases into the verse/dock
+   * gradients. Drawn in the margin outside the free band (and therefore
+   * outside the content band) so the selection cannot sit under the wash.
+   */
+  private drawEdgeFades(w: number, h: number): void {
+    const { ctx } = this;
+    const fade = CanonStrip.EDGE_FADE_PX;
+    const free = this.freeAxis();
+    const bg = this.colors.bg;
+
+    ctx.save();
+    if (this.state.viewport.orientation === "vertical") {
+      const topH = Math.min(fade, free.origin);
+      if (topH > 0) {
+        const topGrad = ctx.createLinearGradient(0, 0, 0, topH);
+        topGrad.addColorStop(0, bg);
+        topGrad.addColorStop(1, withAlpha(bg, 0));
+        ctx.fillStyle = topGrad;
+        ctx.fillRect(0, 0, w, topH);
+      }
+
+      const freeEnd = free.origin + free.length;
+      const botH = Math.min(fade, Math.max(0, h - freeEnd));
+      if (botH > 0) {
+        const botStart = h - botH;
+        const botGrad = ctx.createLinearGradient(0, botStart, 0, h);
+        botGrad.addColorStop(0, withAlpha(bg, 0));
+        botGrad.addColorStop(1, bg);
+        ctx.fillStyle = botGrad;
+        ctx.fillRect(0, botStart, w, botH);
+      }
+    } else {
+      const startW = Math.min(fade, free.origin);
+      if (startW > 0) {
+        const startGrad = ctx.createLinearGradient(0, 0, startW, 0);
+        startGrad.addColorStop(0, bg);
+        startGrad.addColorStop(1, withAlpha(bg, 0));
+        ctx.fillStyle = startGrad;
+        ctx.fillRect(0, 0, startW, h);
+      }
+
+      const freeEnd = free.origin + free.length;
+      const endW = Math.min(fade, Math.max(0, w - freeEnd));
+      if (endW > 0) {
+        const endStart = w - endW;
+        const endGrad = ctx.createLinearGradient(endStart, 0, w, 0);
+        endGrad.addColorStop(0, withAlpha(bg, 0));
+        endGrad.addColorStop(1, bg);
+        ctx.fillStyle = endGrad;
+        ctx.fillRect(endStart, 0, endW, h);
+      }
+    }
+    ctx.restore();
+  }
+
   /* ———— 1. Background ———— */
 
   private drawBackground(w: number, h: number): void {
@@ -952,17 +1311,19 @@ export class CanonStrip {
     const isH = vp.orientation === "horizontal";
     const thick = this.railThick();
     const cross = this.railCross(w, h);
-    const free = this.freeAxis();
+    const band = this.contentAxis();
 
-    // Rail base — only in free band between header/footer
+    // Rail base — content band (inset from soft fades)
     ctx.fillStyle = this.colors.rail;
     if (isH) {
-      ctx.fillRect(free.origin, cross - thick / 2, free.length, thick);
+      ctx.fillRect(band.origin, cross - thick / 2, band.length, thick);
     } else {
-      ctx.fillRect(cross - thick / 2, free.origin, thick, free.length);
+      ctx.fillRect(cross - thick / 2, band.origin, thick, band.length);
     }
 
-    // Genre segments
+    // Genre segments — full color in overview; slightly softer in precision
+    // so a single-genre close-up doesn't turn into a solid slab.
+    const precision = vp.span <= PRECISION_THRESHOLD;
     for (const seg of bookSegments()) {
       if (seg.endVerseIndex < range.start || seg.startVerseIndex > range.end) continue;
       const from = Math.max(seg.startVerseIndex, range.start);
@@ -973,15 +1334,18 @@ export class CanonStrip {
       if (len < 1) continue;
 
       const tint = this.colors.genre(seg.genre);
+      ctx.save();
+      ctx.globalAlpha = precision ? 0.9 : 1;
       ctx.fillStyle = tint;
       if (isH) {
         ctx.fillRect(fromPx.x, cross - thick / 2, len, thick);
       } else {
         ctx.fillRect(cross - thick / 2, fromPx.y, thick, len);
       }
+      ctx.restore();
     }
 
-    if (vp.span > PRECISION_THRESHOLD) {
+    if (!precision) {
       this.drawGenreLabels(range, w, h, cross, isH);
     }
 
@@ -1015,14 +1379,15 @@ export class CanonStrip {
 
     const { ctx } = this;
     ctx.save();
-    ctx.font = `500 6.5px ${SERIF}`;
+    // Genre bands are mid-light tints — dark ink needs solid weight to read.
+    ctx.font = `700 7.5px ${SERIF}`;
     ctx.fillStyle =
       resolvedTheme() === "dark"
-        ? "rgba(220, 210, 200, 0.22)"
-        : "rgba(47, 42, 37, 0.2)";
+        ? "rgba(12, 10, 8, 0.72)"
+        : "rgba(47, 42, 37, 0.42)";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    setLetterSpacing(ctx, "0.8px");
+    setLetterSpacing(ctx, "1px");
 
     for (const group of groups) {
       if (group.end < range.start || group.start > range.end) continue;
@@ -1090,6 +1455,9 @@ export class CanonStrip {
     ctx.textBaseline = "middle";
     setLetterSpacing(ctx, "0.6px");
 
+    const minGap = isH ? 18 : 15;
+    let lastKept = -Infinity;
+
     for (const chapter of chapters) {
       const lengthPx = this.chPx(chapter.start, chapter.end + 1);
       const selected =
@@ -1097,16 +1465,21 @@ export class CanonStrip {
         this.state.provisionalGuess >= chapter.start &&
         this.state.provisionalGuess <= chapter.end;
       // Always retain the selected chapter as a stable orientation anchor.
-      // The live verse reference is painted later and may overlap it briefly;
-      // continuity while scrubbing is more useful than collision avoidance here.
+      // The live verse reference may overlap it briefly; continuity while
+      // scrubbing is more useful than collision avoidance here.
       if (!selected && lengthPx < 20) {
         continue;
       }
 
       const mid = (chapter.start + chapter.end) / 2;
       const p = this.railPoint(mid, w, h);
+      const axis = isH ? p.x : p.y;
+      if (!selected && axis - lastKept < minGap) continue;
+      lastKept = axis;
+
       const label = `${chapter.bookName} ${chapter.chapter}`.toUpperCase();
       if (isH) {
+        // Wide: always above the rail (pre-experiment). Portrait owns notch-side.
         const free = this.freeAxis();
         const labelX = Math.min(
           free.origin + free.length - 8,
@@ -1118,6 +1491,7 @@ export class CanonStrip {
         ctx.translate(labelX, y);
         ctx.rotate(-Math.PI / 2);
         ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
         ctx.fillText(label, 0, 0, available);
         ctx.restore();
       } else {
@@ -1229,14 +1603,23 @@ export class CanonStrip {
     const thick = this.railThick();
     /** Gap from rail edge to label (px). */
     const gap = 6;
+    /** Minimum spacing between book-name anchors along the rail. */
+    const minGap = isH ? 18 : 14;
+    // Portrait only: selection owns the left with its large ref — books go right.
+    const oppositeSide =
+      !isH &&
+      (this.state.provisionalGuess != null || this.state.lockedGuess != null);
 
     // Chapter labels own the precision view; avoid a competing book label.
     if (vp.span <= PRECISION_THRESHOLD) return;
 
-    ctx.save();
-    ctx.font = `9px ${SERIF}`;
-    setLetterSpacing(ctx, "0.5px");
-    ctx.textBaseline = "middle";
+    type Candidate = {
+      name: string;
+      axis: number;
+      p: Point;
+      lenPx: number;
+    };
+    const candidates: Candidate[] = [];
     for (const seg of bookSegments()) {
       // Anchor at the book start — skip if that edge isn't on-screen
       if (
@@ -1248,69 +1631,67 @@ export class CanonStrip {
       const lenPx = this.chPx(seg.startVerseIndex, seg.endVerseIndex + 1);
       // Keep short books quiet, but retain enough landmarks to navigate the
       // full-canon overview without relying only on the very longest books.
-      if (lenPx < (isH ? 20 : 12)) continue;
-      const alpha = Math.min(0.7, 0.3 + (lenPx - 14) / 200);
+      if (lenPx < (isH ? 22 : 14)) continue;
       const p = this.railPoint(seg.startVerseIndex, w, h);
-      ctx.fillStyle =
-        resolvedTheme() === "dark"
-          ? `rgba(200, 190, 180, ${alpha})`
-          : `rgba(110, 101, 90, ${alpha})`;
+      candidates.push({
+        name: seg.name,
+        axis: isH ? p.x : p.y,
+        p,
+        lenPx,
+      });
+    }
+    candidates.sort((a, b) => a.axis - b.axis);
+
+    ctx.save();
+    ctx.font = `600 9px ${SERIF}`;
+    setLetterSpacing(ctx, "0.5px");
+    ctx.textBaseline = "middle";
+
+    let lastKept = -Infinity;
+    for (const c of candidates) {
+      if (c.axis - lastKept < minGap) continue;
+      lastKept = c.axis;
+
+      // Longer books stay fullest; short ones still need readable contrast.
+      const alpha = Math.min(1, 0.78 + (c.lenPx - 14) / 280);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = this.colors.ink2;
       ctx.save();
       if (isH) {
-        // Landscape: above the rail at book start, rotated −90°
-        ctx.translate(p.x, p.y - thick / 2 - gap);
+        // Wide: always above the rail at book start, rotated −90°.
+        ctx.translate(c.p.x, c.p.y - thick / 2 - gap);
         ctx.rotate(-Math.PI / 2);
         ctx.textAlign = "left";
-        ctx.fillText(seg.name.toUpperCase(), 0, 0);
+        ctx.fillText(c.name.toUpperCase(), 0, 0);
+      } else if (oppositeSide) {
+        // Portrait with selection: books on the right (notch side).
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.fillText(
+          c.name.toUpperCase(),
+          c.p.x + thick / 2 + gap,
+          c.p.y + 1
+        );
       } else {
-        // Portrait/mobile: upright at book start, left of the rail
+        // Portrait/mobile default: upright at book start, left of the rail.
         ctx.textAlign = "right";
         ctx.textBaseline = "top";
         ctx.fillText(
-          seg.name.toUpperCase(),
-          p.x - thick / 2 - gap,
-          p.y + 1
+          c.name.toUpperCase(),
+          c.p.x - thick / 2 - gap,
+          c.p.y + 1
         );
       }
       ctx.restore();
     }
+    ctx.globalAlpha = 1;
     setLetterSpacing(ctx, "0px");
     ctx.restore();
   }
 
-  /* ———— 5. Edge labels ———— */
-
-  private drawEdgeLabels(w: number, h: number): void {
-    const { ctx, state } = this;
-    const thick = this.railThick();
-    const cross = this.railCross(w, h);
-    const free = this.freeAxis();
-    const precision = state.viewport.span <= PRECISION_THRESHOLD;
-    // Precision chapters—including partial chapters at both edges—are all
-    // rendered by drawChapterLabels so they share sizing and collision bounds.
-    if (precision) return;
-    ctx.save();
-    ctx.font = `9px ${SERIF}`;
-    setLetterSpacing(ctx, "1px");
-    ctx.fillStyle = this.colors.ink3;
-
-    if (state.viewport.orientation === "vertical") {
-      const labelX = Math.min(w - 8, cross + thick / 2 + 10);
-      ctx.textAlign = "left";
-      const range = this.visibleRange();
-      ctx.fillText(this.edgeLabel(range.start), labelX, free.origin + 14);
-      ctx.fillText(this.edgeLabel(range.end), labelX, free.origin + free.length - 10);
-    } else {
-      const labelY = Math.min(h - 12, cross + thick / 2 + 14);
-      ctx.textAlign = "left";
-      const range = this.visibleRange();
-      ctx.fillText(this.edgeLabel(range.start), free.origin + 10, labelY);
-      ctx.textAlign = "right";
-      ctx.fillText(this.edgeLabel(range.end), free.origin + free.length - 10, labelY);
-    }
-    setLetterSpacing(ctx, "0px");
-    ctx.restore();
-  }
+  /* ———— 5. Edge labels (removed) ———— */
+  // Overview start/end chips ("GENESIS 1" / "REVELATION 22") cluttered the
+  // book-name column; book + genre labels carry orientation instead.
 
   /* ———— 6. Guess marker ———— */
 
@@ -1354,7 +1735,7 @@ export class CanonStrip {
           chipLayout
         );
       } else {
-        this.drawSelectionLabel(formatVerseLabel(ch), p, lifted);
+        this.drawSelectionLabel(ch, p, this.placing, lifted);
       }
     }
   }
@@ -1427,16 +1808,34 @@ export class CanonStrip {
 
   /* ———— 8. Marker label ———— */
 
-  /** Keep the live reference opposite the notch ruler. */
+  /**
+   * Selection callout:
+   * - Wide: compact rotated ref at the pin (pre-experiment landscape).
+   * - Portrait scrubbing: compact upright full ref at the pin.
+   * - Portrait settled: large rotated full ref centered on the timeline.
+   */
   private drawSelectionLabel(
-    label: string,
+    verseIndex: number,
     p: Point,
+    scrubbing: boolean,
     lifted = false
   ): void {
+    const text = formatVerseLabel(verseIndex).toUpperCase();
+    if (this.state.viewport.orientation === "horizontal") {
+      this.drawWidePinLabel(text, p, lifted);
+      return;
+    }
+    if (scrubbing) {
+      this.drawScrubPinLabel(text, p, lifted);
+      return;
+    }
+    this.drawSettledRefLabel(text, p, lifted);
+  }
+
+  /** Wide: compact rotated reference at the pin (HEAD landscape behavior). */
+  private drawWidePinLabel(text: string, p: Point, lifted: boolean): void {
     const { ctx } = this;
-    const isHorizontal = this.state.viewport.orientation === "horizontal";
     const offset = this.railThick() / 2 + NOTCH_GAP;
-    const text = label.toUpperCase();
 
     ctx.save();
     ctx.fillStyle = this.colors.accentDeep;
@@ -1444,22 +1843,174 @@ export class CanonStrip {
     setLetterSpacing(ctx, "0.5px");
     ctx.textBaseline = "middle";
 
-    if (isHorizontal) {
-      const y = p.y - offset;
-      const available = Math.max(40, y - this.chrome.top - 4);
-      ctx.translate(p.x, y);
-      ctx.rotate(-Math.PI / 2);
-      ctx.textAlign = "left";
-      ctx.fillText(text, 0, 0, available);
-    } else {
-      const x = p.x - offset;
-      const available = Math.max(40, x - this.chrome.start - 4);
-      ctx.textAlign = "right";
-      ctx.fillText(text, x, p.y, available);
-    }
+    const y = p.y - offset;
+    const available = Math.max(40, y - this.chrome.top - 4);
+    ctx.translate(p.x, y);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "left";
+    ctx.fillText(text, 0, 0, available);
 
     setLetterSpacing(ctx, "0px");
     ctx.restore();
+  }
+
+  /** Compact upright reference beside the pin — portrait scrub only. */
+  private drawScrubPinLabel(text: string, p: Point, lifted: boolean): void {
+    const { ctx } = this;
+    const offset = this.railThick() / 2 + NOTCH_GAP + 6;
+
+    ctx.save();
+    ctx.fillStyle = this.colors.accentDeep;
+    ctx.font = `700 ${lifted ? 16 : 14}px ${SERIF}`;
+    setLetterSpacing(ctx, "0.4px");
+    ctx.textBaseline = "middle";
+
+    const x = p.x - offset + 6;
+    ctx.textAlign = "right";
+    ctx.fillText(text, x, p.y, Math.max(48, x - 4));
+
+    setLetterSpacing(ctx, "0px");
+    ctx.restore();
+  }
+
+  /** Large rotated full reference, centered on the portrait timeline. */
+  private drawSettledRefLabel(text: string, p: Point, lifted: boolean): void {
+    const { ctx } = this;
+    const size = lifted ? 36 : 30;
+    const band = this.contentAxis();
+    const axisMid = band.origin + band.length / 2;
+
+    ctx.save();
+    ctx.fillStyle = this.colors.accentDeep;
+    ctx.font = `600 ${size}px ${SERIF}`;
+    setLetterSpacing(ctx, "0.06em");
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    const x = Math.max(20, p.x - this.railThick() / 2 - 24);
+    ctx.translate(x, axisMid);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText(text, 0, 0, Math.max(96, band.length * 0.9));
+
+    setLetterSpacing(ctx, "0px");
+    ctx.restore();
+  }
+
+  /**
+   * Touch loupe: magnified local neighborhood offset from the finger so the
+   * verse under the thumb stays readable (mobile-first ADR).
+   */
+  private drawMagnifier(focusVerse: number, w: number, h: number): void {
+    const { ctx } = this;
+    const isH = this.state.viewport.orientation === "horizontal";
+    const p = this.railPoint(focusVerse, w, h);
+    const r = 58;
+    // Offset away from typical thumb occlusion and book-name column.
+    const cx = isH
+      ? Math.min(w - r - 8, Math.max(r + 8, p.x))
+      : Math.min(w - r - 10, p.x + r + 28);
+    const cy = isH
+      ? Math.max(r + 8 + this.chrome.top, p.y - r - 36)
+      : Math.min(
+          h - r - 8 - this.chrome.bottom,
+          Math.max(r + 8 + this.chrome.top, p.y - 28)
+        );
+
+    const halfSpan = this.state.viewport.span > PRECISION_THRESHOLD ? 28 : 12;
+    const startV = clampVerse(focusVerse - halfSpan);
+    const endV = clampVerse(focusVerse + halfSpan);
+    const span = Math.max(1, endV - startV);
+
+    ctx.save();
+    // Soft shadow
+    ctx.beginPath();
+    ctx.arc(cx + 1, cy + 2, r, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(47, 42, 37, 0.12)";
+    ctx.fill();
+
+    // Lens disk
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = this.colors.bg;
+    ctx.fill();
+    ctx.strokeStyle = this.colors.accent;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, r - 1.5, 0, Math.PI * 2);
+    ctx.clip();
+
+    // Mini rail through the lens
+    const thick = 10;
+    ctx.fillStyle = this.colors.rail;
+    if (isH) {
+      ctx.fillRect(cx - r, cy - thick / 2, r * 2, thick);
+    } else {
+      ctx.fillRect(cx - thick / 2, cy - r, thick, r * 2);
+    }
+
+    const loc = bookChapterVerseFromIndex(focusVerse);
+    if (loc) {
+      ctx.fillStyle = this.colors.genre(loc.book.genre);
+      if (isH) {
+        ctx.fillRect(cx - r, cy - thick / 2, r * 2, thick);
+      } else {
+        ctx.fillRect(cx - thick / 2, cy - r, thick, r * 2);
+      }
+    }
+
+    // Verse notches across the lens
+    ctx.strokeStyle = this.colors.ink3;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.55;
+    for (let v = startV; v <= endV; v += 1) {
+      const t = (v - startV) / span;
+      if (isH) {
+        const x = cx - r + t * r * 2;
+        const long = v === focusVerse;
+        ctx.beginPath();
+        ctx.moveTo(x, cy + (long ? thick / 2 + 2 : thick / 2));
+        ctx.lineTo(x, cy + (long ? thick / 2 + 14 : thick / 2 + 7));
+        ctx.stroke();
+      } else {
+        const y = cy - r + t * r * 2;
+        const long = v === focusVerse;
+        ctx.beginPath();
+        ctx.moveTo(cx + (long ? thick / 2 + 2 : thick / 2), y);
+        ctx.lineTo(cx + (long ? thick / 2 + 14 : thick / 2 + 7), y);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // Center diamond
+    ctx.fillStyle = this.colors.accent;
+    diamond(ctx, cx, cy, 7);
+    ctx.fill();
+
+    // Label inside lens
+    const label = formatVerseLabel(focusVerse);
+    ctx.fillStyle = this.colors.accentDeep;
+    ctx.font = `600 11px ${SERIF}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    if (isH) {
+      ctx.fillText(label, cx, cy + thick / 2 + 22, r * 1.6);
+    } else {
+      ctx.fillText(label, cx, cy + r - 16, r * 1.6);
+    }
+
+    ctx.restore();
+
+    // Outer ring after clip restore
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = this.colors.accentDeep;
+    ctx.globalAlpha = 0.35;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
   }
 
   /** Natural size of a YOU/TRUE result chip (before side-fit shrink). */
@@ -1780,18 +2331,6 @@ export class CanonStrip {
     }
   }
 
-  private edgeLabel(verseIndex: number): string {
-    const loc = bookChapterVerseFromIndex(verseIndex);
-    if (!loc) return formatVerseLabel(verseIndex).toUpperCase();
-    if (verseIndex === 1 || verseIndex === TOTAL_VERSES) {
-      return `${loc.book.name} ${loc.chapter}`.toUpperCase();
-    }
-    const atBookStart = verseIndex <= loc.book.startVerseIndex + 2;
-    const atBookEnd = verseIndex >= loc.book.endVerseIndex - 2;
-    if (atBookStart || atBookEnd) return loc.book.name.toUpperCase();
-    return `${loc.book.name} ${loc.chapter}`.toUpperCase();
-  }
-
   private syncAccessibility(): void {
     const value = this.state.provisionalGuess ?? this.state.viewport.center;
     this.canvas.setAttribute("aria-valuemin", "1");
@@ -1860,6 +2399,30 @@ function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: num
 function setLetterSpacing(ctx: CanvasRenderingContext2D, v: string): void {
   const c = ctx as CanvasRenderingContext2D & { letterSpacing?: string };
   if ("letterSpacing" in c) c.letterSpacing = v;
+}
+
+/** Apply alpha to a CSS color for canvas gradient stops. */
+export function withAlpha(color: string, alpha: number): string {
+  const a = Math.min(1, Math.max(0, alpha));
+  if (color.startsWith("oklch(")) {
+    // "oklch(" is 6 chars — slice(5) left a stray "(" and broke canvas gradients.
+    const inner = color.slice(6, -1).trim();
+    if (inner.includes("/")) {
+      return `oklch(${inner.replace(/\/[^/]*$/, `/ ${a}`)})`;
+    }
+    return `oklch(${inner} / ${a})`;
+  }
+  if (color.startsWith("#") && (color.length === 7 || color.length === 4)) {
+    const hex =
+      color.length === 4
+        ? `#${color[1]}${color[1]}${color[2]}${color[2]}${color[3]}${color[3]}`
+        : color;
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+  }
+  return `color-mix(in srgb, ${color} ${Math.round(a * 100)}%, transparent)`;
 }
 
 function easeOutCubic(t: number): number {

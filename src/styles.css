@@ -26,12 +26,13 @@
   --row-rule: oklch(0.86 0.008 50);
   --shadow: oklch(0.27 0.008 50 / 0.08);
 
-  --genre-law: #c5d6b8;
-  --genre-history: #e8d4a4;
-  --genre-poetry: #d4c4e6;
-  --genre-prophets: #e8c49a;
-  --genre-gospels: #edd08c;
-  --genre-epistles: #b8d4c4;
+  /* Genre bands — high chroma; history/gospels off mustard into clay + rose. */
+  --genre-law: oklch(0.74 0.14 145);
+  --genre-history: oklch(0.68 0.14 35);
+  --genre-poetry: oklch(0.72 0.16 305);
+  --genre-prophets: oklch(0.66 0.16 28);
+  --genre-gospels: oklch(0.72 0.14 12);
+  --genre-epistles: oklch(0.72 0.13 185);
 
   --heat-close: oklch(0.84 0.055 145);
   --heat-far: oklch(0.48 0.175 40);
@@ -68,75 +69,75 @@
   color: var(--ink);
 }
 
-/* Dark — same warm hue family, inverted luminance. Prefer data-theme; OS as fallback. */
+/* Dark — lamp-lit ink: near-black neutrals (low chroma), ember terracotta. Prefer data-theme; OS as fallback. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
 
-    --bg: oklch(0.18 0.01 50);
-    --surface: oklch(0.22 0.012 50);
-    --surface-2: oklch(0.28 0.014 50);
-    --rail: oklch(0.32 0.012 50);
+    --bg: oklch(0.16 0.004 48);
+    --surface: oklch(0.20 0.005 48);
+    --surface-2: oklch(0.25 0.006 48);
+    --rail: oklch(0.28 0.006 48);
 
-    --ink: oklch(0.92 0.008 50);
-    --ink-2: oklch(0.74 0.01 50);
-    --ink-3: oklch(0.58 0.01 50);
+    --ink: oklch(0.93 0.006 55);
+    --ink-2: oklch(0.72 0.008 50);
+    --ink-3: oklch(0.55 0.008 50);
 
-    --accent: oklch(0.70 0.14 40);
-    --accent-deep: oklch(0.78 0.12 40);
-    --accent-soft: oklch(0.30 0.05 40);
+    --accent: oklch(0.64 0.145 38);
+    --accent-deep: oklch(0.78 0.11 42);
+    --accent-soft: oklch(0.27 0.04 38);
 
-    --success: oklch(0.68 0.10 145);
-    --error: oklch(0.68 0.12 25);
-    --border: oklch(0.34 0.012 50);
-    --border-strong: oklch(0.42 0.014 50);
-    --row-rule: oklch(0.30 0.01 50);
-    --shadow: oklch(0 0 0 / 0.35);
+    --success: oklch(0.70 0.09 148);
+    --error: oklch(0.68 0.12 22);
+    --border: oklch(0.32 0.006 48);
+    --border-strong: oklch(0.40 0.008 48);
+    --row-rule: oklch(0.28 0.005 48);
+    --shadow: oklch(0 0 0 / 0.5);
 
-    --genre-law: #4a5c42;
-    --genre-history: #6a5a3a;
-    --genre-poetry: #5a4a6a;
-    --genre-prophets: #6a5238;
-    --genre-gospels: #6a5c32;
-    --genre-epistles: #3a5a4a;
+    --genre-law: oklch(0.58 0.18 145);
+    --genre-history: oklch(0.54 0.15 35);
+    --genre-poetry: oklch(0.58 0.19 305);
+    --genre-prophets: oklch(0.56 0.18 28);
+    --genre-gospels: oklch(0.60 0.16 12);
+    --genre-epistles: oklch(0.56 0.16 185);
 
-    --heat-close: oklch(0.55 0.08 145);
-    --heat-far: oklch(0.62 0.16 40);
+    --heat-close: oklch(0.48 0.07 148);
+    --heat-far: oklch(0.58 0.14 38);
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: oklch(0.18 0.01 50);
-  --surface: oklch(0.22 0.012 50);
-  --surface-2: oklch(0.28 0.014 50);
-  --rail: oklch(0.32 0.012 50);
+  --bg: oklch(0.16 0.004 48);
+  --surface: oklch(0.20 0.005 48);
+  --surface-2: oklch(0.25 0.006 48);
+  --rail: oklch(0.28 0.006 48);
 
-  --ink: oklch(0.92 0.008 50);
-  --ink-2: oklch(0.74 0.01 50);
-  --ink-3: oklch(0.58 0.01 50);
+  --ink: oklch(0.93 0.006 55);
+  --ink-2: oklch(0.72 0.008 50);
+  --ink-3: oklch(0.55 0.008 50);
 
-  --accent: oklch(0.70 0.14 40);
-  --accent-deep: oklch(0.78 0.12 40);
-  --accent-soft: oklch(0.30 0.05 40);
+  --accent: oklch(0.64 0.145 38);
+  --accent-deep: oklch(0.78 0.11 42);
+  --accent-soft: oklch(0.27 0.04 38);
 
-  --success: oklch(0.68 0.10 145);
-  --error: oklch(0.68 0.12 25);
-  --border: oklch(0.34 0.012 50);
-  --border-strong: oklch(0.42 0.014 50);
-  --row-rule: oklch(0.30 0.01 50);
-  --shadow: oklch(0 0 0 / 0.35);
+  --success: oklch(0.70 0.09 148);
+  --error: oklch(0.68 0.12 22);
+  --border: oklch(0.32 0.006 48);
+  --border-strong: oklch(0.40 0.008 48);
+  --row-rule: oklch(0.28 0.005 48);
+  --shadow: oklch(0 0 0 / 0.5);
 
-  --genre-law: #4a5c42;
-  --genre-history: #6a5a3a;
-  --genre-poetry: #5a4a6a;
-  --genre-prophets: #6a5238;
-  --genre-gospels: #6a5c32;
-  --genre-epistles: #3a5a4a;
+  --genre-law: oklch(0.58 0.18 145);
+  --genre-history: oklch(0.54 0.15 35);
+  --genre-poetry: oklch(0.58 0.19 305);
+  --genre-prophets: oklch(0.56 0.18 28);
+  --genre-gospels: oklch(0.60 0.16 12);
+  --genre-epistles: oklch(0.56 0.16 185);
 
-  --heat-close: oklch(0.55 0.08 145);
-  --heat-far: oklch(0.62 0.16 40);
+  --heat-close: oklch(0.48 0.07 148);
+  --heat-far: oklch(0.58 0.14 38);
 }
 
 :root[data-theme="light"] {
@@ -482,12 +483,17 @@ button:disabled {
   overflow: hidden;
 }
 
+/*
+ * Board lives in the HUD mid row (1fr) — physically between verse and dock.
+ * No full-bleed fixed canvas; vertical bounds come from grid layout.
+ */
 .board-wrap {
-  position: fixed;
+  position: absolute;
   inset: 0;
-  z-index: var(--z-board);
+  z-index: 0;
   touch-action: none;
   background: var(--bg);
+  pointer-events: auto;
 }
 
 .board-wrap canvas {
@@ -529,7 +535,7 @@ button:disabled {
 
 /*
  * Overlay grid — full width, not a left phone column.
- * Rows: top chrome · verse · free mid (hits pass through) · dock
+ * Rows: top chrome · verse · board mid · dock
  * (Install strip lives inside .hud-chrome so it never steals a row.)
  */
 .hud {
@@ -562,11 +568,14 @@ button:disabled {
   min-width: 0;
 }
 
-/* Mid row is transparent hit-through to the canvas */
+/* Mid row hosts the canon board; cue floats above it */
 .hud-mid {
-  pointer-events: none !important;
-  min-height: 0;
   position: relative;
+  min-height: 0;
+  /* Bleed to viewport edges (undo hud horizontal padding) */
+  margin-inline: calc(var(--hud-inline) * -1);
+  width: calc(100% + 2 * var(--hud-inline));
+  pointer-events: none !important;
 }
 
 .sr-only {
@@ -585,13 +594,14 @@ button:disabled {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 8.5rem;
+  width: auto;
+  max-width: 7rem;
   margin: 0;
   /* Portrait: sit to the right of the rail (book names own the left) */
   transform: translate(28px, -50%);
   color: var(--ink-2);
-  font-size: 0.82rem;
-  line-height: 1.35;
+  font-size: 0.78rem;
+  line-height: 1.3;
   text-align: left;
   text-wrap: pretty;
   transition:
@@ -609,8 +619,33 @@ button:disabled {
   transform: translate(20px, -50%);
 }
 
+/* Place phase: reclaim rail height — clamp verse, compact dock */
+.hud[data-has-marker="false"] .card {
+  padding-bottom: var(--space-sm);
+}
 
-/* Top bar — mode | OT · NT · Book  BSB|KJV | Home
+.hud[data-has-marker="false"] .card .verse {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  font-size: 1.02rem;
+  line-height: 1.4;
+}
+
+.hud[data-has-marker="false"] .dock {
+  padding-top: var(--space-sm);
+}
+
+.hud[data-has-marker="true"] .card .verse {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
+
+/* Top bar — mode | OT|NT|Book  BSB|KJV | Home
+ * Zoom + translation share the same segmented-chip material.
  * Home is pinned to the same viewport corner as the home-page crown. */
 .top-bar {
   display: grid;
@@ -654,6 +689,7 @@ button:disabled {
 .top-bar > .mode-label {
   grid-area: mode;
   justify-self: start;
+  align-self: center;
   min-width: 0;
   white-space: nowrap;
   color: var(--ink-3);
@@ -661,6 +697,7 @@ button:disabled {
   font-variant-caps: all-small-caps;
   letter-spacing: 0.04em;
   font-weight: 500;
+  line-height: 1;
 }
 
 /* Center cluster: zoom links + translation (translation always; zoom when playing) */
@@ -669,73 +706,89 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
+  align-self: center;
   gap: var(--space-sm);
   justify-self: center;
   min-width: 0;
+  /* Match Practice / Home mid-line inside the 44px chrome row */
+  min-height: 44px;
 }
 
-/* Map zoom — plain text links, same voice as mode label */
+/* Map zoom — segmented chip, same material as BSB|KJV */
 .zoom-bar {
   display: flex;
-  align-items: center;
-  justify-content: center;
   gap: 0;
+  margin: 0;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  overflow: hidden;
+  background: transparent;
 }
 
 /* Progressive disclosure: hide zoom until a marker exists (keep BSB|KJV) */
 .hud[data-has-marker="false"] .zoom-bar {
   visibility: hidden;
   pointer-events: none;
-  /* Reserve width so translation doesn't jump when zoom appears */
+  /* Reserve no space so translation stays centered alone */
   width: 0;
+  border: none;
   overflow: hidden;
   margin: 0;
-  gap: 0;
-}
-
-.zoom-sep {
-  color: var(--ink-3);
-  opacity: 0.45;
-  font-size: 0.82rem;
-  padding: 0 1px;
-  user-select: none;
-  pointer-events: none;
 }
 
 .zoom-link {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   appearance: none;
-  border: none;
-  background: transparent;
+  -webkit-appearance: none;
+  box-sizing: border-box;
   margin: 0;
-  padding: var(--space-sm) var(--space-sm);
-  min-height: 44px;
-  min-width: 44px;
-  font-family: inherit;
-  font-size: 0.82rem;
+  padding: 5px 10px;
+  min-height: 0;
+  min-width: 0;
+  border: none;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 0.68rem;
   font-weight: 500;
   font-variant-caps: all-small-caps;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
+  line-height: 1;
   color: var(--ink-3);
   cursor: pointer;
-  transition: color var(--dur-fast) ease;
+  touch-action: manipulation;
+  transition: color var(--dur-fast) ease, background var(--dur-fast) ease;
 }
 
-.zoom-link:hover {
-  color: var(--ink);
+.zoom-link:last-child {
+  border-right: none;
+}
+
+.zoom-link:hover:not(:disabled) {
+  color: var(--ink-2);
 }
 
 .zoom-link.is-active {
-  color: var(--accent-deep);
-  font-weight: 600;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 4px;
+  color: var(--ink);
+  background: var(--surface-2);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.zoom-link:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .zoom-link:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: var(--radius-btn);
+  outline-offset: -2px;
+  z-index: 1;
 }
 
 .precision-zoom-out {
@@ -795,14 +848,17 @@ button:disabled {
   width: 100%;
 }
 
+.guess-tools[hidden] {
+  display: none !important;
+}
+
 .guess-tools .guess-field {
   flex: 1 1 auto;
   min-width: 0;
   width: auto;
 }
 
-/* Verse + dock share one centered measure */
-.verse-band,
+/* Verse + dock share one centered measure; verse band is full-bleed cover */
 .dock {
   width: min(100%, var(--content-max));
   margin-inline: auto;
@@ -812,6 +868,11 @@ button:disabled {
 /* Type is non-interactive; let taps reach the board under the verse band */
 .verse-band {
   pointer-events: none !important;
+  width: 100%;
+  justify-self: stretch;
+  margin-inline: 0;
+  padding-inline: var(--hud-inline);
+  overflow: hidden;
 }
 
 /* Verse — in-flow, type only */
@@ -860,9 +921,12 @@ button:disabled {
 }
 
 .translation-chip button {
-  flex: 1;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   margin: 0;
-  padding: 5px 9px;
+  padding: 5px 10px;
   min-height: 0;
   min-width: 0;
   border: none;
@@ -875,10 +939,11 @@ button:disabled {
   font-weight: 500;
   font-variant-caps: all-small-caps;
   letter-spacing: 0.06em;
-  line-height: 1.2;
+  line-height: 1;
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
+  box-sizing: border-box;
   touch-action: manipulation;
 }
 
@@ -893,7 +958,7 @@ button:disabled {
 .translation-chip button.is-active {
   color: var(--ink);
   background: var(--surface-2);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 700;
 }
 
