@@ -1289,9 +1289,6 @@ export class CanonStrip {
     } else if (this.state.provisionalGuess != null) {
       const lifted = this.placing && this.activePointerType === "touch";
       this.drawGuessMarker(this.state.provisionalGuess, w, h, true, "above", lifted);
-      if (lifted) {
-        this.drawMagnifier(this.state.provisionalGuess, w, h);
-      }
     }
 
     if (
@@ -1995,129 +1992,6 @@ export class CanonStrip {
 
     setLetterSpacing(ctx, "0px");
     ctx.restore();
-  }
-
-  /**
-   * Touch loupe: magnified local neighborhood offset from the finger so the
-   * verse under the thumb stays readable (mobile-first ADR).
-   */
-  private drawMagnifier(focusVerse: number, w: number, h: number): void {
-    const { ctx } = this;
-    const isH = this.state.viewport.orientation === "horizontal";
-    const p = this.railPoint(focusVerse, w, h);
-    const r = 58;
-    // Offset away from typical thumb occlusion and book-name column.
-    const cx = isH
-      ? Math.min(w - r - 8, Math.max(r + 8, p.x))
-      : Math.min(w - r - 10, p.x + r + 28);
-    const cy = isH
-      ? Math.max(r + 8 + this.chrome.top, p.y - r - 36)
-      : Math.min(
-          h - r - 8 - this.chrome.bottom,
-          Math.max(r + 8 + this.chrome.top, p.y - 28)
-        );
-
-    const halfSpan = this.state.viewport.span > PRECISION_THRESHOLD ? 28 : 12;
-    const startV = clampVerse(focusVerse - halfSpan);
-    const endV = clampVerse(focusVerse + halfSpan);
-    const span = Math.max(1, endV - startV);
-
-    ctx.save();
-    // Soft shadow
-    ctx.beginPath();
-    ctx.arc(cx + 1, cy + 2, r, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(47, 42, 37, 0.12)";
-    ctx.fill();
-
-    // Lens disk
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = this.colors.bg;
-    ctx.fill();
-    ctx.strokeStyle = this.colors.accent;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.arc(cx, cy, r - 1.5, 0, Math.PI * 2);
-    ctx.clip();
-
-    // Mini rail through the lens
-    const thick = 10;
-    ctx.fillStyle = this.colors.rail;
-    if (isH) {
-      ctx.fillRect(cx - r, cy - thick / 2, r * 2, thick);
-    } else {
-      ctx.fillRect(cx - thick / 2, cy - r, thick, r * 2);
-    }
-
-    const loc = bookChapterVerseFromIndex(focusVerse);
-    if (loc) {
-      ctx.fillStyle = this.colors.genre(loc.book.genre);
-      if (isH) {
-        ctx.fillRect(cx - r, cy - thick / 2, r * 2, thick);
-      } else {
-        ctx.fillRect(cx - thick / 2, cy - r, thick, r * 2);
-      }
-    }
-
-    // Verse notches across the lens
-    ctx.strokeStyle = this.colors.ink3;
-    ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.55;
-    for (let v = startV; v <= endV; v += 1) {
-      const t = (v - startV) / span;
-      if (isH) {
-        const x = cx - r + t * r * 2;
-        const long = v === focusVerse;
-        ctx.beginPath();
-        ctx.moveTo(x, cy + (long ? thick / 2 + 2 : thick / 2));
-        ctx.lineTo(x, cy + (long ? thick / 2 + 14 : thick / 2 + 7));
-        ctx.stroke();
-      } else {
-        const y = cy - r + t * r * 2;
-        const long = v === focusVerse;
-        ctx.beginPath();
-        ctx.moveTo(cx + (long ? thick / 2 + 2 : thick / 2), y);
-        ctx.lineTo(cx + (long ? thick / 2 + 14 : thick / 2 + 7), y);
-        ctx.stroke();
-      }
-    }
-    ctx.globalAlpha = 1;
-
-    // Center diamond
-    ctx.fillStyle = "#ffffff";
-    diamond(ctx, cx, cy, 7);
-    ctx.fill();
-    ctx.strokeStyle = this.colors.ink;
-    ctx.globalAlpha = 0.35;
-    ctx.lineWidth = 1;
-    diamond(ctx, cx, cy, 7);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-
-    // Label inside lens
-    const label = formatVerseLabel(focusVerse);
-    ctx.fillStyle = selectionTextColor(this.colors.accentDeep);
-    ctx.font = `600 11px ${SERIF}`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    if (isH) {
-      ctx.fillText(label, cx, cy + thick / 2 + 22, r * 1.6);
-    } else {
-      ctx.fillText(label, cx, cy + r - 16, r * 1.6);
-    }
-
-    ctx.restore();
-
-    // Outer ring after clip restore
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.strokeStyle = selectionTextColor(this.colors.accentDeep);
-    ctx.globalAlpha = 0.35;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.globalAlpha = 1;
   }
 
   /** Natural size of a YOU/TRUE result chip (before side-fit shrink). */
