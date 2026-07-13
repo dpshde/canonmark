@@ -11,6 +11,10 @@
   "scripts": {
     "mobile": "pnpm --filter @versemark/mobile start",
     "mobile:start": "pnpm --filter @versemark/mobile start",
+    "mobile:lan": "pnpm --filter @versemark/mobile start -- --lan",
+    "mobile:tunnel": "pnpm --filter @versemark/mobile start -- --tunnel",
+    "ios:device": "pnpm --filter @versemark/mobile ios:device",
+    "lint:mobile": "pnpm --filter @versemark/mobile lint",
     "web": "pnpm --filter @versemark/web dev",
     "web:build": "pnpm --filter @versemark/web build",
     "dev": "pnpm run web",
@@ -27,12 +31,12 @@
   },
   "pnpm": {
     "overrides": {
-      "path-scurry>lru-cache": "^10.4.3"
+      "path-scurry>lru-cache": "10.4.3"
     }
   },
   "overrides": {
     "path-scurry": {
-      "lru-cache": "^10.4.3"
+      "lru-cache": "10.4.3"
     }
   }
 }

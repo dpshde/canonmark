@@ -13,7 +13,12 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "app.versemark.mobile"
+      "bundleIdentifier": "app.versemark.mobile",
+      "buildNumber": "1",
+      "appleTeamId": "467UZHSCC3",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {

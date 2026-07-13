@@ -1,0 +1,18 @@
+diff --git a/build/src/start/platforms/ios/getBestSimulator.js b/build/src/start/platforms/ios/getBestSimulator.js
+index 664c416b8ad18953e6e5ceae5652ce3fbdedd235..d87936b48a8cfe132d4442d609d94561775d971b 100644
+--- a/build/src/start/platforms/ios/getBestSimulator.js
++++ b/build/src/start/platforms/ios/getBestSimulator.js
+@@ -98,8 +98,11 @@ async function getBestUnbootedSimulatorAsync({ osType  } = {}) {
+         osType
+     });
+     if (!simulators.length) {
+-        // TODO: Prompt to install the simulators
+-        throw new _errors.CommandError("UNSUPPORTED_OS_TYPE", `No ${osType || "iOS"} devices available in Simulator.app`);
++        // No simulator runtimes installed. Physical devices can still be used via
++        // `expo run:ios --device`; callers that require a simulator check for null.
++        // (Stock Expo CLI throws here and breaks device builds with zero simulators.)
++        debug(`No selectable ${osType || "iOS"} simulators; returning null.`);
++        return null;
+     }
+     // If the default udid is defined, then check to ensure its osType matches the required os.
+     if (defaultId) {

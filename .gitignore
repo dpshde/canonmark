@@ -41,3 +41,7 @@ packages/*/node_modules/
 *.mobileprovision
 *.orig.*
 web-build/
+.secrets/
+signing/
+.asc/
+.xcode-platforms/

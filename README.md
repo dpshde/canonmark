@@ -55,3 +55,5 @@ Shipped data under `apps/web/public/data/` and `packages/core/src/data/` is comm
 ## Production deploy (web)
 
 Vercel builds `@versemark/web` (`vercel.json` → `apps/web/dist`).
+
+See [docs/ci-cd.md](docs/ci-cd.md) for the required CI gate, Vercel preview/production flow, rollback procedure, and the ASC-based React Native iOS release runbook.

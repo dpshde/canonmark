@@ -3,9 +3,15 @@
   "compilerOptions": {
     "strict": true,
     "noEmit": true,
+    "resolveJsonModule": true,
     "paths": {
       "@versemark/core": ["../../packages/core/src/index.ts"]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx", "../../packages/core/src/**/*.ts"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "../../packages/core/src/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist-export", "ios", "android"]
 }

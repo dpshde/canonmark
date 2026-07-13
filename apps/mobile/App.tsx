@@ -1,118 +1,205 @@
 /**
- * Expo-first shell — exercises shared @versemark/core on device.
- * Full play UI (native strip, etc.) lands in later passes.
+ * Versemark native client — Daily / Endless play on a full-canon timeline.
+ * Domain rules live in @versemark/core; this shell owns UI, haptics, storage, share.
  */
 import { StatusBar } from "expo-status-bar";
-import { useMemo } from "react";
-import { StyleSheet, Text, View, ScrollView } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  createMemoryKvStore,
-  emptyAppState,
+  startDailyRound,
+  startEndlessRound,
   loadState,
-  scoreRound,
-  setStorageBackend,
-  BOOKS,
-  formatMiss,
-  buildOverallStats,
+  markAchievementsSeen,
+  emptyAppState,
+  loadTranslation,
+  saveTranslation,
+  achievementDefForId,
+  type RoundData,
+  type TextBundle,
+  type AppState,
+  type PoolItem,
+  type TranslationId,
 } from "@versemark/core";
-
-// Session memory store until AsyncStorage hydrate is wired.
-setStorageBackend(createMemoryKvStore());
+import { installNativeStorage } from "./src/lib/storage-native";
+import { loadPool, loadTextBundles } from "./src/lib/gameData";
+import { RootNavigator } from "./src/navigation/RootNavigator";
+import { AppToast } from "./src/components/AppToast";
+import { fontFamily } from "./src/theme";
+import { ThemeProvider, useTheme } from "./src/theme-context";
+import {
+  ActivityIndicator,
+  SafeAreaProvider,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  View,
+} from "./src/design-system";
 
 export default function App() {
-  const snapshot = useMemo(() => {
-    const state = loadState();
-    // Non-trivial pure calls from shipped core (verse indices + hint step)
-    const exact = scoreRound(100, 100, 1);
-    const missSample = scoreRound(100, 140, 1);
-    const stats = buildOverallStats(state);
-    return {
-      emptyRounds: emptyAppState().lifetime.scoredRounds,
-      books: BOOKS.length,
-      exactTotal: exact.total,
-      midMissTotal: missSample.total,
-      midDistance: missSample.distance,
-      loadedRounds: state.lifetime.scoredRounds,
-      exactRate: stats.exactRate,
-      medianMissLabel: formatMiss(40),
+  return (
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <AppShell />
+      </ThemeProvider>
+    </SafeAreaProvider>
+  );
+}
+
+function AppShell() {
+  const { colors, scheme } = useTheme();
+  const [boot, setBoot] = useState<
+    { status: "loading" } | { status: "ready" } | { status: "error"; message: string }
+  >({ status: "loading" });
+  const [appState, setAppState] = useState<AppState>(emptyAppState);
+  const [round, setRound] = useState<RoundData | null>(null);
+  const [translation, setTranslation] = useState<TranslationId>("bsb");
+  const [unlockNotice, setUnlockNotice] = useState<string | null>(null);
+  const unlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const pool = useMemo(() => loadPool(), []);
+  const textsByTranslation = useMemo(() => loadTextBundles(), []);
+  const texts = textsByTranslation[translation];
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await installNativeStorage();
+        if (cancelled) return;
+        setTranslation(loadTranslation());
+        setAppState(loadState());
+        setBoot({ status: "ready" });
+      } catch (e) {
+        if (cancelled) return;
+        setBoot({
+          status: "error",
+          message: e instanceof Error ? e.message : "Failed to start",
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
   }, []);
 
-  return (
-    <View style={styles.root}>
-      <StatusBar style="dark" />
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.kicker}>Versemark</Text>
-        <Text style={styles.title}>Expo shell</Text>
-        <Text style={styles.body}>
-          Shared domain from @versemark/core — scoring, books, state shapes.
-          Timeline strip and full play UI stay platform-native.
-        </Text>
+  useEffect(() => () => {
+    if (unlockTimerRef.current) clearTimeout(unlockTimerRef.current);
+  }, []);
 
-        <View style={styles.card}>
-          <Text style={styles.row}>Books in canon · {snapshot.books}</Text>
-          <Text style={styles.row}>
-            Empty lifetime rounds · {snapshot.emptyRounds}
-          </Text>
-          <Text style={styles.row}>
-            Exact score (same verse, h1) · {snapshot.exactTotal}
-          </Text>
-          <Text style={styles.row}>
-            Mid miss (d={snapshot.midDistance}, h1) · {snapshot.midMissTotal}
-          </Text>
-          <Text style={styles.row}>
-            formatMiss(40) · {snapshot.medianMissLabel}
-          </Text>
-          <Text style={styles.row}>
-            Loaded exact rate · {snapshot.exactRate}
-          </Text>
-        </View>
-      </ScrollView>
+  const refreshState = useCallback(() => {
+    setAppState(loadState());
+  }, []);
+
+  const exitRound = useCallback(() => {
+    setRound(null);
+    refreshState();
+  }, [refreshState]);
+
+  const startDaily = useCallback(() => {
+    const r = startDailyRound(pool, texts);
+    setRound(r);
+  }, [pool, texts]);
+
+  const startEndless = useCallback(() => {
+    const r = startEndlessRound(pool, texts);
+    setRound(r);
+  }, [pool, texts]);
+
+  const openProgress = useCallback(() => {
+    markAchievementsSeen();
+    setAppState(loadState());
+  }, []);
+
+  const continueEndless = useCallback(() => {
+    const r = startEndlessRound(pool, texts);
+    setRound(r);
+  }, [pool, texts]);
+
+  const changeTranslation = useCallback(
+    (next: TranslationId) => {
+      if (next === translation) return;
+      saveTranslation(next);
+      setTranslation(next);
+      setRound((current) => {
+        if (!current) return current;
+        const bundle = textsByTranslation[next];
+        return {
+          ...current,
+          verseText: bundle.verses[current.poolItem.ref] ?? "(text unavailable)",
+          paragraph: bundle.paragraphs[current.poolItem.ref] ?? null,
+        };
+      });
+    },
+    [textsByTranslation, translation]
+  );
+
+  const showUnlocks = useCallback((ids: string[]) => {
+    const first = achievementDefForId(ids[0] ?? "");
+    const more = ids.length > 1 ? ` · +${ids.length - 1} more` : "";
+    setUnlockNotice(`Unlocked · ${first?.title ?? "Achievement"}${more}`);
+    if (unlockTimerRef.current) clearTimeout(unlockTimerRef.current);
+    unlockTimerRef.current = setTimeout(() => {
+      unlockTimerRef.current = null;
+      setUnlockNotice(null);
+    }, 3200);
+  }, []);
+
+  if (boot.status === "loading") {
+    return (
+      <SafeAreaView style={[styles.boot, { backgroundColor: colors.bg }]}>
+        <StatusBar style={scheme === "dark" ? "light" : "dark"} />
+        <ActivityIndicator color={colors.accent} size="large" />
+        <Text style={[styles.bootText, { color: colors.ink2 }]}>Versemark</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (boot.status === "error") {
+    return (
+      <SafeAreaView style={[styles.boot, { backgroundColor: colors.bg }]}>
+        <StatusBar style={scheme === "dark" ? "light" : "dark"} />
+        <Text style={[styles.bootText, { color: colors.ink2 }]}>{boot.message}</Text>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <View style={[styles.root, { backgroundColor: colors.bg }]}>
+      <StatusBar style={scheme === "dark" ? "light" : "dark"} />
+      <RootNavigator
+        appState={appState}
+        round={round}
+        texts={texts}
+        translation={translation}
+        onStartDaily={startDaily}
+        onStartEndless={startEndless}
+        onProgressFocus={openProgress}
+        onExitRound={exitRound}
+        onTranslation={changeTranslation}
+        onRoundChange={setRound}
+        onAppState={setAppState}
+        onUnlocks={showUnlocks}
+        onContinueEndless={continueEndless}
+      />
+      <AppToast message={unlockNotice} />
     </View>
   );
 }
 
+// Re-export for smoke tests that assert core wiring surface.
+export type { PoolItem, TextBundle, RoundData };
+
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: "#faf8f4",
   },
-  scroll: {
-    paddingTop: 72,
-    paddingHorizontal: 24,
-    paddingBottom: 48,
+  boot: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
   },
-  kicker: {
-    fontSize: 12,
-    fontWeight: "600",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-    color: "#8a7f76",
-    marginBottom: 8,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "600",
-    color: "#2c2825",
-    marginBottom: 12,
-  },
-  body: {
+  bootText: {
+    fontFamily,
     fontSize: 16,
-    lineHeight: 24,
-    color: "#5c554e",
-    marginBottom: 24,
-    maxWidth: 360,
-  },
-  card: {
-    borderWidth: 1,
-    borderColor: "#d4cdc4",
-    backgroundColor: "#f5f1ea",
-    padding: 16,
-    gap: 10,
-  },
-  row: {
-    fontSize: 15,
-    color: "#2c2825",
-    fontVariant: ["tabular-nums"],
   },
 });

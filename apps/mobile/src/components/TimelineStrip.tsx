@@ -1,0 +1,660 @@
+/**
+ * Portrait-first canon board. A rough placement uses the whole vertical canon,
+ * then the same axis expands into a testament/book precision view.
+ */
+import { useCallback, useMemo, useRef, useState } from "react";
+import { Linking } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  PanResponder,
+  Platform,
+  Pressable,
+  useWindowDimensions,
+  type LayoutChangeEvent,
+  type GestureResponderEvent,
+} from "../design-system";
+import {
+  BOOKS,
+  OT_END,
+  NT_START,
+  TOTAL_VERSES,
+  bookChapterVerseFromIndex,
+  bookSegments,
+  clampVerse,
+  formatVerseLabel,
+  routeBibleUrl,
+  testamentSeamT,
+  viewportForPrecision,
+  visibleRange,
+  type ZoomPreset,
+} from "@versemark/core";
+import { hapticSelection } from "../lib/haptics";
+import { genreColor, spacing } from "../theme";
+import { useTheme } from "../theme-context";
+
+export type NativeZoom = "full" | ZoomPreset;
+
+export type TimelineStripProps = {
+  guessVerseIndex: number | null;
+  truthVerseIndex?: number | null;
+  interactive?: boolean;
+  zoom: NativeZoom;
+  onPlace: (verseIndex: number) => void;
+};
+
+type TimelineRange = {
+  start: number;
+  end: number;
+  top: string;
+  bottom: string;
+  genre: string | null;
+};
+
+const AXIS_INSET = 20;
+const RAIL_WIDTH = 22;
+const MARKER_SIZE = 14;
+const NOTCH_GAP = 8;
+const ACTIVE_NOTCH_LENGTH = 28;
+const OVERVIEW_LANDMARK_OSIS = new Set(["JOS", "EZR", "ROM", "EPH", "HEB", "REV"]);
+const OVERVIEW_SKIP_OSIS = new Set(["JDG", "2SA", "2KI", "2CH"]);
+
+type BookLabel = ReturnType<typeof bookSegments>[number] & { y: number; length: number };
+type ChapterLabel = { key: string; label: string; start: number };
+
+function precisionChapters(
+  range: TimelineRange,
+  selectedVerse: number | null,
+  axisLength: number
+): ChapterLabel[] {
+  const chapters: ChapterLabel[] = [];
+  for (let verseIndex = range.start; verseIndex <= range.end; verseIndex += 1) {
+    const loc = bookChapterVerseFromIndex(verseIndex);
+    if (!loc) continue;
+    const key = `${loc.book.osis}:${loc.chapter}`;
+    if (chapters.at(-1)?.key !== key) {
+      chapters.push({ key, label: `${loc.book.name} ${loc.chapter}`.toUpperCase(), start: verseIndex });
+    }
+  }
+
+  const kept: ChapterLabel[] = [];
+  const selectedLoc = selectedVerse == null ? null : bookChapterVerseFromIndex(selectedVerse);
+  let lastY = -Infinity;
+  const span = Math.max(1, range.end - range.start);
+  for (const chapter of chapters) {
+    const [osis, chapterNumber] = chapter.key.split(":");
+    const selected = selectedLoc?.book.osis === osis && selectedLoc.chapter === Number(chapterNumber);
+    const y = ((chapter.start - range.start) / span) * axisLength;
+    if (!selected && y - lastY < 15) continue;
+    kept.push(chapter);
+    lastY = y;
+  }
+  return kept;
+}
+
+function pickBookLabels(
+  segments: ReturnType<typeof bookSegments>,
+  range: TimelineRange,
+  axisLength: number
+): BookLabel[] {
+  if (axisLength <= 0 || range.genre) return [];
+  const span = Math.max(1, range.end - range.start);
+  const candidates = segments.flatMap((segment) => {
+    if (segment.startVerseIndex < range.start || segment.startVerseIndex > range.end) return [];
+    const from = Math.max(segment.startVerseIndex, range.start);
+    const to = Math.min(segment.endVerseIndex, range.end);
+    const length = ((to - from + 1) / span) * axisLength;
+    if (OVERVIEW_SKIP_OSIS.has(segment.osis)) return [];
+    if (length < 14 && !OVERVIEW_LANDMARK_OSIS.has(segment.osis)) return [];
+    return [{
+      ...segment,
+      y: AXIS_INSET + ((segment.startVerseIndex - range.start) / span) * axisLength,
+      length,
+    }];
+  });
+  const kept: BookLabel[] = [];
+  const fits = (candidate: BookLabel) => kept.every((item) => Math.abs(item.y - candidate.y) >= 13);
+  for (const candidate of candidates.filter((item) => OVERVIEW_LANDMARK_OSIS.has(item.osis))) {
+    if (fits(candidate)) kept.push(candidate);
+  }
+  for (const candidate of candidates.filter((item) => !OVERVIEW_LANDMARK_OSIS.has(item.osis))) {
+    if (fits(candidate)) kept.push(candidate);
+  }
+  return kept.sort((a, b) => a.y - b.y);
+}
+
+function rangeFor(zoom: NativeZoom, anchor: number | null): TimelineRange {
+  if (zoom === "full" || anchor == null) {
+    return { start: 1, end: TOTAL_VERSES, top: "Genesis", bottom: "Revelation", genre: null };
+  }
+  if (zoom === "ot") {
+    return { start: 1, end: OT_END, top: "Genesis", bottom: "Malachi", genre: null };
+  }
+  if (zoom === "nt") {
+    return { start: NT_START, end: TOTAL_VERSES, top: "Matthew", bottom: "Revelation", genre: null };
+  }
+  const loc = bookChapterVerseFromIndex(anchor) ?? { book: BOOKS[0]! };
+  const viewport = viewportForPrecision(
+    { center: anchor, span: 150, orientation: "vertical", axisPx: 1, crossPx: 1 },
+    anchor
+  );
+  const visible = visibleRange(viewport);
+  return {
+    start: visible.start,
+    end: visible.end,
+    top: "",
+    bottom: "",
+    genre: loc.book.genre,
+  };
+}
+
+function labelTop(y: number | null, height: number): number {
+  return Math.max(4, Math.min(height - 44, (y ?? AXIS_INSET) - 19));
+}
+
+export function TimelineStrip({
+  guessVerseIndex,
+  truthVerseIndex = null,
+  interactive = true,
+  zoom,
+  onPlace,
+}: TimelineStripProps) {
+  const { colors, typography } = useTheme();
+  const window = useWindowDimensions();
+  const heightRef = useRef(0);
+  const [height, setHeight] = useState(0);
+  const [dragVerse, setDragVerse] = useState<number | null>(null);
+  const dragVerseRef = useRef<number | null>(null);
+  const lastHapticVerse = useRef<number | null>(null);
+  const range = rangeFor(zoom, guessVerseIndex ?? truthVerseIndex);
+  const span = Math.max(1, range.end - range.start);
+  const precise = zoom !== "full";
+  const bookPrecision = zoom === "book" && guessVerseIndex != null;
+  const revealed = !interactive && truthVerseIndex != null;
+  const boardHeight = Math.round(Math.min(620, Math.max(
+    revealed ? 340 : precise ? 400 : 470,
+    window.height * (revealed ? 0.46 : precise ? 0.52 : 0.62)
+  )));
+  const axisLength = Math.max(1, height - AXIS_INSET * 2);
+  const displayGuess = dragVerse ?? guessVerseIndex;
+
+  const placeAt = useCallback(
+    (y: number) => {
+      if (!interactive || heightRef.current <= AXIS_INSET * 2) return;
+      const usable = heightRef.current - AXIS_INSET * 2;
+      const fraction = Math.min(1, Math.max(0, (y - AXIS_INSET) / usable));
+      const verseIndex = clampVerse(range.start + fraction * span);
+      if (lastHapticVerse.current !== verseIndex) {
+        lastHapticVerse.current = verseIndex;
+        hapticSelection();
+      }
+      dragVerseRef.current = verseIndex;
+      setDragVerse(verseIndex);
+    },
+    [interactive, range.start, span]
+  );
+
+  const finishPlacement = useCallback(() => {
+    const placed = dragVerseRef.current;
+    dragVerseRef.current = null;
+    if (placed != null) onPlace(placed);
+    setDragVerse(null);
+  }, [onPlace]);
+
+  const cancelPlacement = useCallback(() => {
+    dragVerseRef.current = null;
+    setDragVerse(null);
+  }, []);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => interactive,
+        onMoveShouldSetPanResponder: () => interactive,
+        onPanResponderGrant: (event: GestureResponderEvent) => placeAt(event.nativeEvent.locationY),
+        onPanResponderMove: (event: GestureResponderEvent) => placeAt(event.nativeEvent.locationY),
+        onPanResponderRelease: finishPlacement,
+        onPanResponderTerminate: cancelPlacement,
+        onPanResponderTerminationRequest: () => false,
+      }),
+    [cancelPlacement, finishPlacement, interactive, placeAt]
+  );
+
+  const onLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextHeight = event.nativeEvent.layout.height;
+    heightRef.current = nextHeight;
+    setHeight((current) => (current === nextHeight ? current : nextHeight));
+  }, []);
+
+  const yFor = (verse: number | null) => {
+    if (verse == null || verse < range.start || verse > range.end || height <= 0) return null;
+    return AXIS_INSET + ((verse - range.start) / span) * axisLength;
+  };
+  const guessY = yFor(displayGuess);
+  const truthY = yFor(truthVerseIndex);
+  const activeLabel = displayGuess != null ? formatVerseLabel(displayGuess) : null;
+  const segments = bookSegments().filter(
+    (segment) => segment.endVerseIndex >= range.start && segment.startVerseIndex <= range.end
+  );
+  const bookLabels = pickBookLabels(segments, range, axisLength);
+  const chapterLabels = bookPrecision ? precisionChapters(range, displayGuess, axisLength) : [];
+
+  return (
+    <View style={styles.wrap}>
+      <View
+        style={[styles.board, { height: boardHeight }]}
+        onLayout={onLayout}
+        {...panResponder.panHandlers}
+        accessibilityRole="adjustable"
+        accessibilityLabel="Canon timeline"
+        accessibilityHint="Drag up or down to place your guess along Scripture"
+        accessibilityValue={{ min: range.start, max: range.end, now: displayGuess ?? undefined, text: activeLabel ?? "No marker placed" }}
+        accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
+        onAccessibilityAction={(event) => {
+          if (!interactive) return;
+          const delta = precise ? 1 : Math.max(1, Math.round(span / 100));
+          const base = displayGuess ?? range.start;
+          onPlace(clampVerse(base + (event.nativeEvent.actionName === "increment" ? delta : -delta)));
+        }}
+      >
+        {precise && !bookPrecision ? <Text style={[typography.section, styles.topEnd, { color: colors.ink3 }]}>{range.top}</Text> : null}
+        {precise && !bookPrecision ? <Text style={[typography.section, styles.bottomEnd, { color: colors.ink3 }]}>{range.bottom}</Text> : null}
+
+        {bookLabels.map((book) => (
+          <Text
+            key={book.osis}
+            pointerEvents="none"
+            numberOfLines={1}
+            style={[typography.section, styles.bookLabel, { top: book.y - 6, color: colors.ink2 }]}
+          >
+            {book.name}
+          </Text>
+        ))}
+
+        {chapterLabels.map((chapter) => {
+          const chapterY = yFor(chapter.start);
+          if (chapterY == null) return null;
+          return (
+            <Text
+              key={chapter.key}
+              pointerEvents="none"
+              numberOfLines={1}
+              style={[styles.chapterLabel, { top: chapterY - 7, color: colors.ink2 }]}
+            >
+              {chapter.label}
+            </Text>
+          );
+        })}
+
+        <View
+          pointerEvents="none"
+          style={[
+            styles.rail,
+            {
+              top: AXIS_INSET,
+              bottom: AXIS_INSET,
+              backgroundColor: colors.rail,
+            },
+          ]}
+        >
+          {range.genre ? (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: genreColor(range.genre, colors), opacity: 0.82 }]} />
+          ) : (
+            segments.map((segment) => {
+              const from = Math.max(segment.startVerseIndex, range.start);
+              const to = Math.min(segment.endVerseIndex, range.end);
+              return (
+                <View
+                  key={segment.osis}
+                  style={{
+                    position: "absolute",
+                    top: `${((from - range.start) / span) * 100}%`,
+                    height: `${((to - from + 1) / span) * 100}%`,
+                    left: 0,
+                    right: 0,
+                    backgroundColor: genreColor(segment.genre, colors),
+                  }}
+                />
+              );
+            })
+          )}
+
+          {!range.genre ? segments.slice(1).map((segment) => (
+            <View
+              key={`boundary-${segment.osis}`}
+              style={[
+                styles.bookBoundary,
+                {
+                  top: `${((segment.startVerseIndex - range.start) / span) * 100}%`,
+                  backgroundColor: colors.bg,
+                },
+              ]}
+            />
+          )) : null}
+
+          {zoom === "full" && range.start === 1 && range.end === TOTAL_VERSES ? (
+            <View style={[styles.seam, { top: `${testamentSeamT() * 100}%`, backgroundColor: colors.bg }]} />
+          ) : null}
+
+          {precise && !bookPrecision
+            ? Array.from({ length: 21 }, (_, index) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.tick,
+                    {
+                      top: `${(index / 20) * 100}%`,
+                      width: index % 5 === 0 ? RAIL_WIDTH : 10,
+                      backgroundColor: colors.bg,
+                    },
+                  ]}
+                />
+              ))
+            : null}
+        </View>
+
+        {bookPrecision ? Array.from({ length: range.end - range.start + 1 }, (_, index) => {
+          const verseIndex = range.start + index;
+          const verseY = yFor(verseIndex);
+          const loc = bookChapterVerseFromIndex(verseIndex);
+          const selected = verseIndex === displayGuess;
+          const chapterStart = loc?.verse === 1 || verseIndex === range.start;
+          const milestone = loc != null && loc.verse % 5 === 0;
+          const length = selected ? ACTIVE_NOTCH_LENGTH : chapterStart ? 22 : milestone ? 16 : 10;
+          return (
+            <View
+              key={`verse-notch-${verseIndex}`}
+              pointerEvents="none"
+              style={[
+                styles.verseNotch,
+                {
+                  top: (verseY ?? AXIS_INSET) - (selected ? 1.25 : 0.5),
+                  width: length,
+                  height: selected ? 2.5 : chapterStart ? 1.5 : 1,
+                  backgroundColor: selected ? colors.ink : chapterStart ? colors.ink2 : colors.ink3,
+                  opacity: selected ? 1 : chapterStart ? 0.62 : milestone ? 0.45 : 0.28,
+                },
+              ]}
+            />
+          );
+        }) : null}
+
+        {truthY != null && guessY != null && truthY !== guessY ? (
+          <View
+            pointerEvents="none"
+            style={[
+              styles.resultConnector,
+              {
+                top: Math.min(truthY, guessY),
+                height: Math.max(2, Math.abs(truthY - guessY)),
+                backgroundColor: colors.borderStrong,
+              },
+            ]}
+          />
+        ) : null}
+
+        {truthY != null ? (
+          <>
+            <View
+              pointerEvents="none"
+              style={[
+                styles.truthMarker,
+                { top: truthY - MARKER_SIZE / 2, backgroundColor: colors.success, borderColor: colors.bg },
+              ]}
+            />
+            {revealed ? (
+              <Pressable
+                onPress={() => {
+                  const url = routeBibleUrl(truthVerseIndex!);
+                  if (url) void Linking.openURL(url);
+                }}
+                accessibilityRole="link"
+                accessibilityLabel={`Answer ${formatVerseLabel(truthVerseIndex!)}`}
+                style={[styles.truthLabel, { top: labelTop(truthY, height), backgroundColor: colors.surface, borderColor: colors.borderStrong }]}
+              >
+                <Text style={[typography.section, { color: colors.success }]}>Answer</Text>
+                <Text style={[typography.body, styles.markerRef, { color: colors.ink }]}>{formatVerseLabel(truthVerseIndex!)}</Text>
+              </Pressable>
+            ) : null}
+          </>
+        ) : null}
+
+        {guessY != null ? (
+          <>
+            {dragVerse != null ? (
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.markerHalo,
+                  {
+                    top: guessY - 12,
+                    backgroundColor: colors.accentSoft,
+                    borderColor: colors.accent,
+                  },
+                ]}
+              />
+            ) : null}
+            <View
+              pointerEvents="none"
+              style={[
+                styles.guessMarker,
+                {
+                  top: guessY - MARKER_SIZE / 2,
+                  backgroundColor: bookPrecision ? colors.bg : dragVerse != null ? colors.bg : colors.accent,
+                  borderColor: bookPrecision ? colors.ink3 : dragVerse != null ? colors.accent : colors.bg,
+                },
+              ]}
+            />
+            {!revealed && activeLabel && bookPrecision && dragVerse == null ? (
+              <View pointerEvents="none" style={styles.settledRefWrap}>
+                <Text style={[styles.settledRef, { color: colors.accentDeep }]}>
+                  {activeLabel.toUpperCase()}
+                </Text>
+              </View>
+            ) : null}
+            {!revealed && activeLabel && bookPrecision && dragVerse != null ? (
+              <Text
+                pointerEvents="none"
+                numberOfLines={1}
+                style={[styles.scrubRef, { top: labelTop(guessY, height) + 8, color: colors.accentDeep }]}
+              >
+                {activeLabel.toUpperCase()}
+              </Text>
+            ) : null}
+            {!revealed && activeLabel && !bookPrecision ? (
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.liveGuessLabel,
+                  {
+                    top: labelTop(guessY, height),
+                    backgroundColor: dragVerse != null ? colors.accentSoft : colors.surface,
+                    borderColor: dragVerse != null ? colors.accent : colors.borderStrong,
+                  },
+                ]}
+              >
+                <Text numberOfLines={1} style={[typography.body, styles.liveMarkerRef, { color: colors.ink }]}>
+                  {activeLabel}
+                </Text>
+              </View>
+            ) : null}
+            {revealed ? (
+              <Pressable
+                onPress={() => {
+                  const url = displayGuess == null ? null : routeBibleUrl(displayGuess);
+                  if (url) void Linking.openURL(url);
+                }}
+                accessibilityRole="link"
+                accessibilityLabel={activeLabel ? `Your guess ${activeLabel}` : undefined}
+                style={[
+                  styles.guessLabel,
+                  {
+                    top: labelTop(guessY, height),
+                    backgroundColor: colors.surface,
+                    borderColor: colors.borderStrong,
+                  },
+                ]}
+              >
+                <Text style={[typography.section, { color: colors.accent }]}>You</Text>
+                <Text style={[typography.body, styles.markerRef, { color: colors.ink }]}>{activeLabel}</Text>
+              </Pressable>
+            ) : null}
+          </>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  wrap: { width: "100%", alignItems: "center" },
+  board: { width: "100%", maxWidth: 540, position: "relative" },
+  rail: {
+    position: "absolute",
+    left: "50%",
+    width: RAIL_WIDTH,
+    marginLeft: -RAIL_WIDTH / 2,
+    overflow: "hidden",
+  },
+  seam: { position: "absolute", left: 0, right: 0, height: 2, marginTop: -1, opacity: 0.9 },
+  tick: { position: "absolute", left: 0, height: 1, opacity: 0.8 },
+  bookBoundary: { position: "absolute", left: 0, right: 0, height: StyleSheet.hairlineWidth, opacity: 0.3 },
+  bookLabel: {
+    position: "absolute",
+    right: "50%",
+    marginRight: RAIL_WIDTH / 2 + 7,
+    maxWidth: 112,
+    fontSize: 9,
+    lineHeight: 12,
+    textAlign: "right",
+  },
+  chapterLabel: {
+    position: "absolute",
+    right: "50%",
+    marginRight: RAIL_WIDTH / 2 + NOTCH_GAP + ACTIVE_NOTCH_LENGTH + 10,
+    maxWidth: 116,
+    fontFamily: Platform.select({ ios: "Georgia", android: "serif", default: "Georgia" }),
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: "600",
+    letterSpacing: 0.6,
+    textAlign: "right",
+  },
+  topEnd: { position: "absolute", top: 0, left: "50%", marginLeft: RAIL_WIDTH / 2 + 10, fontSize: 10 },
+  bottomEnd: { position: "absolute", bottom: 0, left: "50%", marginLeft: RAIL_WIDTH / 2 + 10, fontSize: 10 },
+  verseNotch: {
+    position: "absolute",
+    right: "50%",
+    marginRight: RAIL_WIDTH / 2 + NOTCH_GAP,
+  },
+  resultConnector: { position: "absolute", left: "50%", width: 2, marginLeft: -1, opacity: 0.7 },
+  guessMarker: {
+    position: "absolute",
+    left: "50%",
+    marginLeft: -MARKER_SIZE / 2,
+    width: MARKER_SIZE,
+    height: MARKER_SIZE,
+    transform: [{ rotate: "45deg" }],
+    borderWidth: 2,
+    zIndex: 4,
+  },
+  markerHalo: {
+    position: "absolute",
+    left: "50%",
+    marginLeft: -12,
+    width: 24,
+    height: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    transform: [{ rotate: "45deg" }],
+    opacity: 0.72,
+    zIndex: 3,
+  },
+  liveGuessLabel: {
+    position: "absolute",
+    left: "50%",
+    marginLeft: RAIL_WIDTH / 2 + spacing.sm,
+    minWidth: 104,
+    maxWidth: 148,
+    minHeight: 38,
+    justifyContent: "center",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    borderCurve: "continuous",
+    zIndex: 5,
+  },
+  liveMarkerRef: { fontSize: 15, lineHeight: 20, fontWeight: "600" },
+  settledRefWrap: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: "50%",
+    marginLeft: RAIL_WIDTH / 2 + 24,
+    width: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 5,
+  },
+  settledRef: {
+    width: 280,
+    fontFamily: Platform.select({ ios: "Georgia", android: "serif", default: "Georgia" }),
+    fontSize: 30,
+    lineHeight: 38,
+    fontWeight: "600",
+    letterSpacing: 1.8,
+    textAlign: "center",
+    transform: [{ rotate: "90deg" }],
+  },
+  scrubRef: {
+    position: "absolute",
+    left: "50%",
+    marginLeft: RAIL_WIDTH / 2 + 14,
+    maxWidth: 180,
+    fontFamily: Platform.select({ ios: "Georgia", android: "serif", default: "Georgia" }),
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+    zIndex: 6,
+  },
+  truthMarker: {
+    position: "absolute",
+    left: "50%",
+    marginLeft: -MARKER_SIZE / 2,
+    width: MARKER_SIZE,
+    height: MARKER_SIZE,
+    transform: [{ rotate: "45deg" }],
+    borderWidth: 2,
+    zIndex: 3,
+  },
+  guessLabel: {
+    position: "absolute",
+    left: "50%",
+    marginLeft: RAIL_WIDTH / 2 + spacing.lg,
+    minWidth: 96,
+    maxWidth: 138,
+    minHeight: 40,
+    justifyContent: "center",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderWidth: 1,
+    zIndex: 5,
+  },
+  truthLabel: {
+    position: "absolute",
+    right: "50%",
+    marginRight: RAIL_WIDTH / 2 + spacing.lg,
+    minWidth: 96,
+    maxWidth: 138,
+    minHeight: 40,
+    alignItems: "flex-end",
+    justifyContent: "center",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderWidth: 1,
+    zIndex: 5,
+  },
+  markerRef: { fontSize: 14, lineHeight: 19 },
+});
