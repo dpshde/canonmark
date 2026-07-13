@@ -1,5 +1,6 @@
 /**
- * Achievements snap deck + full-data sheets (presentation only).
+ * Achievements Wrapped-style story deck + full-data sheets (presentation only).
+ * One claim per full-viewport card; top segment progress (not side dots).
  * View models from achievements-deck-model / achievements-stats.
  */
 import {
@@ -440,50 +441,92 @@ function buildGenreStatsLabel(id: string): string {
   return map[id] ?? id;
 }
 
-function linkish(
-  text: string,
-  onClick: () => void
-): HTMLButtonElement {
-  const b = el("button", {
-    class: "deck-linkish",
-    type: "button",
-    text,
-  });
-  b.addEventListener("click", () => {
-    onClick();
-  });
-  return b;
-}
-
 function cardShell(
   id: DeckCardId,
-  kicker: string,
-  children: HTMLElement[]
+  children: HTMLElement[],
+  opts?: { kicker?: string; tone?: string }
 ): HTMLElement {
+  const tone = opts?.tone ? ` deck-card--${opts.tone}` : "";
   const card = el("section", {
-    class: "deck-card",
+    class: `deck-card${tone}`,
     id: `deck-card-${id}`,
     "data-card": id,
   });
-  card.append(el("p", { class: "deck-kicker", text: kicker }));
+  if (opts?.kicker) {
+    card.append(el("p", { class: "deck-kicker", text: opts.kicker }));
+  }
   const grow = el("div", { class: "deck-grow" });
   for (const c of children) grow.append(c);
   card.append(grow);
   return card;
 }
 
+/** Image-4 metric row: label over value, hairline pipes between cells. */
+function metricsRow(
+  items: { label: string; value: string }[]
+): HTMLElement {
+  const row = el("div", {
+    class: "deck-metrics",
+    role: "group",
+    "aria-label": "Key stats",
+  });
+  items.forEach((c, i) => {
+    if (i > 0) row.append(el("span", { class: "deck-metrics-rule", "aria-hidden": "true" }));
+    const cell = el("div", { class: "deck-metrics-cell" });
+    cell.append(
+      el("span", { class: "deck-metrics-label", text: c.label }),
+      el("span", { class: "deck-metrics-value", text: c.value })
+    );
+    row.append(cell);
+  });
+  return row;
+}
+
+/**
+ * Image-4 stack: terracotta claim → charcoal hero → unit → pipe metrics.
+ * One focal column, no orphaned kickers or chip boxes.
+ */
+function claimStack(opts: {
+  claim?: string;
+  hero?: string;
+  unit?: string;
+  metrics?: { label: string; value: string }[];
+  extra?: HTMLElement[];
+  /** Insert extras before hero (e.g. drop-cap on next card). */
+  extraBeforeHero?: HTMLElement[];
+}): HTMLElement {
+  const stack = el("div", { class: "deck-stack" });
+  if (opts.claim) {
+    stack.append(el("p", { class: "deck-claim", text: opts.claim }));
+  }
+  if (opts.extraBeforeHero) {
+    for (const node of opts.extraBeforeHero) stack.append(node);
+  }
+  if (opts.hero != null) {
+    stack.append(el("p", { class: "deck-hero", text: opts.hero }));
+  }
+  if (opts.unit) {
+    stack.append(el("p", { class: "deck-unit", text: opts.unit }));
+  }
+  if (opts.metrics?.length) {
+    stack.append(metricsRow(opts.metrics));
+  }
+  if (opts.extra) {
+    for (const node of opts.extra) stack.append(node);
+  }
+  return stack;
+}
+
 function renderYouCard(
   model: DeckModel,
   handlers: DeckHandlers
 ): HTMLElement {
-  const kids: HTMLElement[] = [
-    el("h2", { class: "deck-headline", text: model.you.headline }),
-  ];
+  const kids: HTMLElement[] = [];
   if (model.you.empty) {
     kids.push(
-      el("p", {
-        class: "deck-sub",
-        text: "Daily or Practice — one verse is enough to open the map.",
+      claimStack({
+        claim: model.you.headline,
+        unit: "one verse opens the map",
       })
     );
     const cta = el("button", {
@@ -497,76 +540,30 @@ function renderYouCard(
     });
     kids.push(cta);
   } else {
-    const big = el("div", { class: "deck-big-stat", text: model.you.heroValue });
-    big.append(
-      el("span", { class: "deck-big-stat-unit", text: model.you.heroUnit })
-    );
-    kids.push(big);
-    const chips = el("div", { class: "deck-chip-row" });
-    for (const c of model.you.chips) {
-      const chip = el("span", { class: "deck-chip" });
-      chip.append(
-        document.createTextNode(`${c.label} `),
-        el("strong", { text: c.value })
-      );
-      chips.append(chip);
-    }
-    kids.push(chips);
     kids.push(
-      el("p", {
-        class: "deck-stage",
-        text: `Stage · ${model.you.stageLabel}`,
+      claimStack({
+        claim: model.you.headline,
+        hero: model.you.heroValue,
+        unit: model.you.heroUnit,
+        metrics: model.you.chips,
       })
     );
   }
-  const card = cardShell("you", "You", kids);
-  const foot = el("div", { class: "deck-foot" });
-  if (!model.you.empty) {
-    foot.append(
-      linkish("Full stats · every metric", () => {
-        handlers.haptic?.();
-        openSheet("stats", loadFromModel(model), model, handlers);
-      })
-    );
-  }
-  foot.append(
-    el("p", {
-      class: "deck-hint-swipe",
-      text: model.empty ? "Swipe for index" : "Swipe",
-    })
-  );
-  card.append(foot);
-  return card;
-}
-
-/** Keep state ref for sheets opened from cards — set on each render. */
-let lastState: AppState | null = null;
-
-function loadFromModel(_model: DeckModel): AppState {
-  return lastState!;
+  return cardShell("you", kids, { tone: "pulse" });
 }
 
 function renderMapCard(
   model: DeckModel,
-  handlers: DeckHandlers,
-  state: AppState
+  handlers: DeckHandlers
 ): HTMLElement {
-  const kids: HTMLElement[] = [
-    el("h2", {
-      class: "deck-headline",
-      text: "Where you're warm — and where you're guessing.",
-    }),
-  ];
   const stage = el("div", { class: "deck-map-stage" });
   const rail = el("div", {
     class: "deck-map-rail",
     role: "group",
     "aria-label": "Canon heat by book",
   });
-  const readout = el("div", { class: "deck-map-readout" });
-  const nameEl = el("p", { class: "deck-map-name", text: "Tap a book" });
-  const metaEl = el("p", { class: "deck-map-meta", text: "" });
-  readout.append(nameEl, metaEl);
+  const nameEl = el("p", { class: "deck-hero deck-hero--sm", text: "—" });
+  const metaEl = el("p", { class: "deck-unit", text: "tap a book" });
 
   let selected =
     model.map.segments.find((s) => s.rounds > 0)?.osis ??
@@ -581,7 +578,7 @@ function renderMapCard(
     metaEl.textContent =
       seg.rounds > 0
         ? `${seg.metric} · ${seg.rounds} round${seg.rounds === 1 ? "" : "s"}`
-        : "Not tested yet";
+        : "not tested yet";
     for (const btn of rail.querySelectorAll(".deck-map-seg")) {
       btn.classList.toggle("is-on", (btn as HTMLElement).dataset.osis === osis);
     }
@@ -610,51 +607,40 @@ function renderMapCard(
     el("div", { class: "deck-map-ends" }, [
       el("span", { text: "Genesis" }),
       el("span", { text: "Revelation" }),
-    ]),
-    readout
+    ])
   );
-  kids.push(stage);
   if (selected) update(selected);
 
-  const card = cardShell("map", "Canon map", kids);
-  const foot = el("div", { class: "deck-foot" });
-  foot.append(
-    linkish("All 66 books · complete", () => {
-      handlers.haptic?.();
-      openSheet("books", state, model, handlers);
-    })
-  );
-  card.append(foot);
-  return card;
+  const stack = claimStack({
+    claim: "Where you're warm — and where you're guessing.",
+    extra: [stage, nameEl, metaEl],
+  });
+  return cardShell("map", [stack], { tone: "map" });
 }
 
 function renderPickCard(
   id: "far" | "close",
   model: DeckModel,
   handlers: DeckHandlers,
-  state: AppState,
   onBias?: (osis: string) => void
 ): HTMLElement {
   const pick = id === "far" ? model.far : model.close;
-  const kicker = id === "far" ? "Far" : "Close";
-  const headline =
+  const claim =
     id === "far"
       ? "Books that still pull you off the map."
       : "Books you already place with less miss.";
-  const kids: HTMLElement[] = [
-    el("h2", { class: "deck-headline", text: headline }),
-  ];
   const list = el("div", { class: "deck-pick-list" });
-  const top = pick.rows.slice(0, 3);
+  const top = pick.rows.slice(0, 4);
+  const extras: HTMLElement[] = [];
   if (!top.length) {
-    kids.push(
+    extras.push(
       el("p", {
-        class: "deck-sub",
-        text: "Play more rounds to rank books.",
+        class: "deck-unit",
+        text: "play more rounds to rank books",
       })
     );
   } else {
-    for (const row of top) {
+    top.forEach((row, rank) => {
       const btn = el("button", {
         class: "deck-pick-row",
         type: "button",
@@ -663,6 +649,11 @@ function renderPickCard(
       const swatch = el("span", { class: "deck-pick-swatch" });
       swatch.style.background = row.heat;
       btn.append(
+        el("span", {
+          class: "deck-pick-rank",
+          text: String(rank + 1),
+          "aria-hidden": "true",
+        }),
         swatch,
         el("span", { class: "deck-pick-name", text: row.name }),
         el("span", { class: "deck-pick-metric", text: row.metric })
@@ -681,162 +672,105 @@ function renderPickCard(
         });
       }
       list.append(btn);
-    }
-    kids.push(list);
+    });
+    extras.push(list);
   }
-  const card = cardShell(id, kicker, kids);
-  const foot = el("div", { class: "deck-foot" });
-  foot.append(
-    linkish(
-      id === "far"
-        ? "Full far list · every book"
-        : "Full close list · every book",
-      () => {
-        handlers.haptic?.();
-        openSheet("books", state, model, handlers, { filter: id });
-      }
-    )
-  );
-  card.append(foot);
-  return card;
+  return cardShell(id, [claimStack({ claim, extra: extras })], {
+    tone: id,
+  });
 }
 
 function renderNextCard(
   model: DeckModel,
-  handlers: DeckHandlers
+  _handlers: DeckHandlers
 ): HTMLElement {
   const next = model.next!;
-  const kids: HTMLElement[] = [
-    el("h2", { class: "deck-headline", text: "Next checkpoint" }),
-  ];
-  const face = el("div", { class: "deck-next-face" });
-  const frame = el("div", {
-    class: `achievement-dropcap-frame metal-${next.metal} is-featured`,
-    "aria-hidden": "true",
-  });
-  const img = document.createElement("img");
-  img.className = "achievement-dropcap";
-  img.alt = "";
-  img.width = 88;
-  img.height = 88;
-  img.decoding = "async";
-  if (handlers.bindDropCap) {
-    handlers.bindDropCap(img, handlers.baseUrl, next.dropCap, next.metal);
-  } else {
-    img.src = `${handlers.baseUrl}${next.dropCap}`;
-  }
-  frame.append(img);
-  face.append(
-    frame,
-    el("p", { class: "deck-next-title", text: next.title }),
-    el("p", { class: "deck-next-desc", text: next.description }),
-    el("p", {
-      class: "deck-next-progress",
-      text: `${next.current.toLocaleString()} / ${next.threshold.toLocaleString()}`,
-    })
-  );
+  // Type-only — no drop-cap tile. Claim → big title → progress.
   const bar = el("div", { class: "achievement-progress deck-next-bar" }, [
     el("div", {
       class: "achievement-progress-fill",
       style: `width:${Math.round(Math.max(0, next.progress) * 100)}%`,
     }),
   ]);
-  face.append(bar);
-  kids.push(face);
-  const card = cardShell("next", "Next", kids);
-  const foot = el("div", { class: "deck-foot" });
-  foot.append(
-    linkish("All earned unlocks", () => {
-      handlers.haptic?.();
-      openSheet("earned", lastState!, model, handlers);
-    })
+  return cardShell(
+    "next",
+    [
+      claimStack({
+        claim: "Next mark",
+        hero: next.title,
+        unit: `${next.current.toLocaleString()} of ${next.threshold.toLocaleString()}`,
+        extra: [bar],
+      }),
+    ],
+    { tone: "next" }
   );
-  card.append(foot);
-  return card;
 }
 
+/**
+ * Marks — one path, one number. Quiet path switcher; no drop-caps, trail, or essays.
+ */
 function renderMarksPathCard(
   model: DeckModel,
   handlers: DeckHandlers,
-  state: AppState
+  _state: AppState
 ): HTMLElement {
-  const kids: HTMLElement[] = [
-    el("h2", {
-      class: "deck-headline",
-      text: "Lifelong marks — one path at a time.",
-    }),
-  ];
-  const tabs = el("div", {
-    class: "path-tabs",
+  const paths = model.marksPath.paths;
+  const switcher = el("div", {
+    class: "path-switch",
     role: "tablist",
     "aria-label": "Skill paths",
   });
-  const trail = el("div", { class: "trail", role: "list" });
-  const face = el("div", { class: "trail-face" });
+  const host = el("div", { class: "deck-marks-focus" });
 
-  let activeKey = model.marksPath.paths[0]?.key ?? "sight";
+  let activeKey = paths[0]?.key ?? "sight";
 
   const showPath = (path: MarksPathEntry) => {
     activeKey = path.key;
-    for (const t of tabs.querySelectorAll(".path-tab")) {
+    for (const t of switcher.querySelectorAll(".path-switch-btn")) {
       const on = (t as HTMLElement).dataset.path === path.key;
       t.classList.toggle("is-on", on);
       t.setAttribute("aria-selected", on ? "true" : "false");
     }
-    trail.replaceChildren();
-    let focus =
+    host.replaceChildren();
+    const node =
       path.nodes.find((n) => n.status === "now") ??
       path.nodes[path.nodes.length - 1] ??
       null;
-    const paintFace = (node: (typeof path.nodes)[0] | null) => {
-      face.replaceChildren();
-      if (!node) {
-        face.append(el("p", { class: "deck-sub", text: "No rungs on this path yet." }));
-        return;
-      }
-      face.append(
-        el("p", {
-          class: "trail-face-status",
-          text:
-            node.status === "passed"
-              ? "Passed"
-              : node.status === "now"
-                ? "Now"
-                : "Ahead",
-        }),
-        el("p", { class: "trail-face-title", text: node.title }),
-        el("p", { class: "trail-face-desc", text: node.description }),
-        el("p", {
-          class: "trail-face-meta",
-          text: `${node.current.toLocaleString()} / ${node.threshold.toLocaleString()}`,
+    if (!node) {
+      host.append(
+        claimStack({
+          claim: path.label,
+          hero: "—",
+          unit: "no progress yet",
         })
       );
-    };
-    for (const node of path.nodes) {
-      const btn = el("button", {
-        class: `trail-node is-${node.status}`,
-        type: "button",
-        role: "listitem",
-        text: String(node.threshold),
-        title: node.title,
-      });
-      btn.addEventListener("click", () => {
-        handlers.haptic?.();
-        focus = node;
-        for (const n of trail.querySelectorAll(".trail-node")) {
-          n.classList.toggle("is-focus", n === btn);
-        }
-        paintFace(node);
-      });
-      if (node === focus) btn.classList.add("is-focus");
-      trail.append(btn);
+      return;
     }
-    paintFace(focus);
+    const bar = el("div", { class: "achievement-progress deck-next-bar" }, [
+      el("div", {
+        class: "achievement-progress-fill",
+        style: `width:${Math.round(Math.max(0, node.progress) * 100)}%`,
+      }),
+    ]);
+    // claim = rung title, hero = count, unit = path · threshold only
+    host.append(
+      claimStack({
+        claim: node.title,
+        hero: node.current.toLocaleString(),
+        unit: `${path.label} · of ${node.threshold.toLocaleString()}`,
+        extra: [bar],
+      })
+    );
   };
 
-  for (const path of model.marksPath.paths) {
+  paths.forEach((path, i) => {
+    if (i > 0) {
+      switcher.append(
+        el("span", { class: "path-switch-sep", text: "·", "aria-hidden": "true" })
+      );
+    }
     const tab = el("button", {
-      class: `path-tab${path.key === activeKey ? " is-on" : ""}`,
+      class: `path-switch-btn${path.key === activeKey ? " is-on" : ""}`,
       type: "button",
       role: "tab",
       "data-path": path.key,
@@ -847,44 +781,21 @@ function renderMarksPathCard(
       handlers.haptic?.();
       showPath(path);
     });
-    tabs.append(tab);
-  }
-  kids.push(tabs, trail, face);
-  const first = model.marksPath.paths.find((p) => p.key === activeKey);
+    switcher.append(tab);
+  });
+
+  const first = paths.find((p) => p.key === activeKey);
   if (first) showPath(first);
 
-  const card = cardShell("marks-path", "Marks path", kids);
-  const foot = el("div", { class: "deck-foot" });
-  foot.append(
-    linkish("All marks on this path · complete", () => {
-      handlers.haptic?.();
-      openSheet("marks", state, model, handlers, { pathKey: activeKey });
-    }),
-    linkish("Every mark · all paths", () => {
-      handlers.haptic?.();
-      openSheet("marks-all", state, model, handlers);
-    })
-  );
-  card.append(foot);
-  return card;
+  const wrap = el("div", { class: "deck-marks-wrap" });
+  wrap.append(host, switcher);
+  return cardShell("marks-path", [wrap], { tone: "marks" });
 }
 
 function renderTrainCard(
   model: DeckModel,
   handlers: DeckHandlers
 ): HTMLElement {
-  const kids: HTMLElement[] = [
-    el("h2", {
-      class: "deck-headline",
-      text: "Train the miss down.",
-    }),
-    el("p", {
-      class: "deck-sub",
-      text: model.train.bookName
-        ? `Bias set: ${model.train.bookName}. Practice still draws the full pool — focus is yours.`
-        : "Daily for ritual. Practice for volume.",
-    }),
-  ];
   const row = el("div", { class: "deck-train-row" });
   const primary = el("button", {
     class: "btn-primary",
@@ -910,8 +821,63 @@ function renderTrainCard(
     handlers.onStartDaily();
   });
   row.append(primary, secondary);
-  kids.push(row);
-  return cardShell("train", "Train", kids);
+
+  const stack = claimStack({
+    claim: "Train the miss down.",
+    unit: model.train.bookName
+      ? `bias · ${model.train.bookName}`
+      : "daily for ritual · practice for volume",
+    extra: [row],
+  });
+  return cardShell("train", [stack], { tone: "train" });
+}
+
+/** Deck + index list previews — DESIGN.md: ~4 rows, expand in place. */
+const PREVIEW_ROWS = 4;
+
+function appendExpandableList<T>(
+  host: HTMLElement,
+  items: T[],
+  renderRow: (item: T) => HTMLElement,
+  moreLabel: (hidden: number) => string
+): void {
+  const preview = items.slice(0, PREVIEW_ROWS);
+  const rest = items.slice(PREVIEW_ROWS);
+  for (const item of preview) host.append(renderRow(item));
+  if (!rest.length) return;
+
+  const more = el("div", { class: "toc-more", hidden: "true" });
+  for (const item of rest) more.append(renderRow(item));
+  const toggle = el("button", {
+    class: "toc-expand",
+    type: "button",
+    "aria-expanded": "false",
+  });
+  const setLabel = (open: boolean) => {
+    toggle.textContent = open
+      ? "Show less"
+      : moreLabel(rest.length);
+  };
+  setLabel(false);
+  toggle.addEventListener("click", () => {
+    handlersHapticSoft();
+    const open = more.hasAttribute("hidden");
+    if (open) {
+      more.removeAttribute("hidden");
+      toggle.setAttribute("aria-expanded", "true");
+    } else {
+      more.setAttribute("hidden", "true");
+      toggle.setAttribute("aria-expanded", "false");
+    }
+    setLabel(open);
+  });
+  host.append(more, toggle);
+}
+
+/** Optional haptic from last deck mount — index expand should stay quiet-capable. */
+let lastHaptic: (() => void) | undefined;
+function handlersHapticSoft(): void {
+  lastHaptic?.();
 }
 
 function renderIndexCard(
@@ -920,53 +886,74 @@ function renderIndexCard(
   state: AppState,
   scrollToCard: (id: DeckCardId) => void
 ): HTMLElement {
-  const kids: HTMLElement[] = [
-    el("h2", { class: "deck-headline", text: "Index" }),
-  ];
+  lastHaptic = handlers.haptic;
+  const extras: HTMLElement[] = [];
+
   if (model.index.story.length) {
-    kids.push(el("p", { class: "toc-section", text: "Story" }));
-    const toc = el("nav", { class: "toc", "aria-label": "Story cards" });
-    for (const row of model.index.story) {
-      const btn = el("button", {
-        class: "toc-row",
-        type: "button",
-        "data-goto": row.cardId,
-      });
-      btn.append(
-        el("span", { class: "n", text: row.n }),
-        el("span", { class: "t", text: row.title }),
-        el("span", { class: "m", text: row.meta })
-      );
-      btn.addEventListener("click", () => {
-        handlers.haptic?.();
-        scrollToCard(row.cardId);
-      });
-      toc.append(btn);
-    }
-    kids.push(toc);
-  }
-  kids.push(el("p", { class: "toc-section", text: "Full data" }));
-  const dataNav = el("nav", { class: "toc", "aria-label": "Full data sheets" });
-  for (const row of model.index.fullData) {
-    const btn = el("button", {
-      class: "toc-row",
-      type: "button",
+    const block = el("div", { class: "toc-block" });
+    block.append(el("p", { class: "toc-section", text: "Go to" }));
+    const toc = el("nav", {
+      class: "toc toc--dest",
+      "aria-label": "Deck cards",
     });
-    btn.append(
-      el("span", { class: "n", text: "··" }),
-      el("span", { class: "t", text: row.title }),
-      el("span", { class: "m", text: row.meta })
+    appendExpandableList(
+      toc,
+      model.index.story,
+      (row) => {
+        const btn = el("button", {
+          class: "toc-dest",
+          type: "button",
+          "data-goto": row.cardId,
+        });
+        btn.append(
+          el("span", { class: "toc-dest-t", text: row.title }),
+          el("span", { class: "toc-dest-m", text: row.meta })
+        );
+        btn.addEventListener("click", () => {
+          handlers.haptic?.();
+          scrollToCard(row.cardId);
+        });
+        return btn;
+      },
+      (n) => `+${n} more`
     );
-    btn.addEventListener("click", () => {
-      handlers.haptic?.();
-      openSheet(row.sheetId, state, model, handlers, {
-        filter: row.filter,
-        pathKey: row.pathKey,
-      });
-    });
-    dataNav.append(btn);
+    block.append(toc);
+    extras.push(block);
   }
-  kids.push(dataNav);
+
+  {
+    const block = el("div", { class: "toc-block" });
+    block.append(el("p", { class: "toc-section", text: "Open ledger" }));
+    const dataNav = el("nav", {
+      class: "toc toc--dest",
+      "aria-label": "Full data sheets",
+    });
+    appendExpandableList(
+      dataNav,
+      model.index.fullData,
+      (row) => {
+        const btn = el("button", {
+          class: "toc-dest",
+          type: "button",
+        });
+        btn.append(
+          el("span", { class: "toc-dest-t", text: row.title }),
+          el("span", { class: "toc-dest-m", text: row.meta })
+        );
+        btn.addEventListener("click", () => {
+          handlers.haptic?.();
+          openSheet(row.sheetId, state, model, handlers, {
+            filter: row.filter,
+            pathKey: row.pathKey,
+          });
+        });
+        return btn;
+      },
+      (n) => `+${n} more`
+    );
+    block.append(dataNav);
+    extras.push(block);
+  }
 
   const actions = el("div", { class: "toc-actions" });
   const daily = el("button", {
@@ -988,9 +975,14 @@ function renderIndexCard(
     handlers.onStartPractice();
   });
   actions.append(daily, practice);
-  kids.push(actions);
+  extras.push(actions);
 
-  return cardShell("index", "Index", kids);
+  const stack = claimStack({
+    claim: "Jump anywhere.",
+    extra: extras,
+  });
+  stack.classList.add("deck-stack--ledger");
+  return cardShell("index", [stack], { tone: "index" });
 }
 
 /**
@@ -1002,7 +994,6 @@ export function renderAchievementsDeck(
   handlers: DeckHandlers
 ): void {
   closeSheet();
-  lastState = state;
   const model = buildDeckModel(state, sessionTrainBias);
 
   app.innerHTML = "";
@@ -1011,8 +1002,13 @@ export function renderAchievementsDeck(
     id: "screen-achievements",
   });
 
+  // Chrome is type-only actions + story progress — no title competing with the card claim.
   const chrome = el("div", { class: "deck-chrome" });
-  chrome.append(el("h1", { text: "Achievements" }));
+  const progress = el("div", {
+    class: "deck-progress",
+    role: "tablist",
+    "aria-label": "Story position",
+  });
   const actions = el("div", { class: "deck-chrome-actions" });
   const themeBtn = handlers.onThemeToggle();
   const home = el("button", {
@@ -1032,12 +1028,11 @@ export function renderAchievementsDeck(
     handlers.onHome();
   });
   actions.append(themeBtn, home);
-  chrome.append(actions);
 
   const deck = el("main", {
     class: "deck",
     id: "achievements-deck",
-    "aria-label": "Achievements deck",
+    "aria-label": "Your year in marks",
   });
 
   const scrollToCard = (id: DeckCardId) => {
@@ -1053,10 +1048,10 @@ export function renderAchievementsDeck(
 
   const cardBuilders: Record<DeckCardId, () => HTMLElement> = {
     you: () => renderYouCard(model, handlers),
-    map: () => renderMapCard(model, handlers, state),
+    map: () => renderMapCard(model, handlers),
     far: () =>
-      renderPickCard("far", model, handlers, state, () => remountTrainLabels()),
-    close: () => renderPickCard("close", model, handlers, state),
+      renderPickCard("far", model, handlers, () => remountTrainLabels()),
+    close: () => renderPickCard("close", model, handlers),
     next: () => renderNextCard(model, handlers),
     "marks-path": () => renderMarksPathCard(model, handlers, state),
     train: () => renderTrainCard(model, handlers),
@@ -1068,26 +1063,43 @@ export function renderAchievementsDeck(
     if (build) deck.append(build());
   }
 
-  const dots = el("div", {
-    class: "deck-dots",
-    role: "tablist",
-    "aria-label": "Deck position",
-  });
-  const dotButtons: HTMLButtonElement[] = [];
+  const segmentButtons: HTMLButtonElement[] = [];
+  const cardLabels: Record<DeckCardId, string> = {
+    you: "Your pulse",
+    map: "Canon map",
+    far: "Far books",
+    close: "Close books",
+    next: "Next mark",
+    "marks-path": "Marks path",
+    train: "Train",
+    index: "Index",
+  };
   model.cards.forEach((id, i) => {
-    const d = el("button", {
+    const seg = el("button", {
       type: "button",
-      class: i === 0 ? "on" : "",
-      "aria-label": `Card ${i + 1}`,
+      class: `deck-progress-seg${i === 0 ? " is-on" : ""}`,
+      "aria-label": cardLabels[id] ?? `Card ${i + 1}`,
       "data-card": id,
     });
-    d.addEventListener("click", () => {
+    seg.append(el("span", { class: "deck-progress-fill" }));
+    seg.addEventListener("click", () => {
       handlers.haptic?.();
       scrollToCard(id);
     });
-    dots.append(d);
-    dotButtons.push(d);
+    progress.append(seg);
+    segmentButtons.push(seg);
   });
+
+  chrome.append(progress, actions);
+
+  const setActiveCard = (activeId: string) => {
+    const idx = model.cards.indexOf(activeId as DeckCardId);
+    segmentButtons.forEach((seg, i) => {
+      seg.classList.toggle("is-on", seg.dataset.card === activeId);
+      seg.classList.toggle("is-past", idx >= 0 && i < idx);
+      seg.classList.toggle("is-ahead", idx >= 0 && i > idx);
+    });
+  };
 
   const observer = new IntersectionObserver(
     (entries) => {
@@ -1101,9 +1113,7 @@ export function renderAchievementsDeck(
         }
       }
       if (!best) return;
-      for (const d of dotButtons) {
-        d.classList.toggle("on", d.dataset.card === best.id);
-      }
+      setActiveCard(best.id);
     },
     { root: deck, threshold: [0.5, 0.65, 0.8] }
   );
@@ -1111,7 +1121,23 @@ export function renderAchievementsDeck(
     observer.observe(card);
   }
 
-  screen.append(chrome, deck, dots);
+  // Tap empty card chrome advances (Wrapped story feel); interactive controls keep the event.
+  for (const card of deck.querySelectorAll(".deck-card")) {
+    card.addEventListener("click", (ev) => {
+      const t = ev.target as HTMLElement;
+      if (t.closest("button, a, input, select, textarea, [role='tab'], [role='listitem']")) {
+        return;
+      }
+      const id = (card as HTMLElement).dataset.card as DeckCardId | undefined;
+      if (!id) return;
+      const i = model.cards.indexOf(id);
+      if (i < 0 || i >= model.cards.length - 1) return;
+      handlers.haptic?.();
+      scrollToCard(model.cards[i + 1]!);
+    });
+  }
+
+  screen.append(chrome, deck);
   app.append(screen);
 }
 

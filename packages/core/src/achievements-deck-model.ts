@@ -1,5 +1,5 @@
 /**
- * Pure view-model for the achievements snap deck.
+ * Pure view-model for the achievements Wrapped-style story deck.
  * Driven only by live AppState via mastery / achievements / storage.
  */
 import { bookSegments } from "./axis";
@@ -249,14 +249,13 @@ function buildYou(state: AppState, mastery: MasteryReport): YouCardModel {
       ? "Finish a daily or practice round to start your ledger."
       : headline,
     heroValue: empty ? "—" : overall.exactRate === "—" ? "0%" : overall.exactRate,
-    heroUnit: empty
-      ? "exact · from your Dailies & Practice"
-      : "exact · from your Dailies & Practice",
+    // Image-4 unit line: short, centered, no “from your…”
+    heroUnit: "exact · dailies & practice",
     chips: empty
       ? [
           { label: "Unaided", value: "—" },
           { label: "Books", value: "0/66" },
-          { label: "Median miss", value: "—" },
+          { label: "Median", value: "—" },
         ]
       : [
           { label: "Unaided", value: overall.unaidedRate },
@@ -264,7 +263,7 @@ function buildYou(state: AppState, mastery: MasteryReport): YouCardModel {
             label: "Books",
             value: `${overall.booksTested}/${overall.booksTotal}`,
           },
-          { label: "Median miss", value: overall.medianMiss },
+          { label: "Median", value: overall.medianMiss },
         ],
     stageLabel: stageFromProgress(mastery.totalRounds, booksTested),
     empty,
@@ -462,42 +461,37 @@ function buildIndex(
   model: Omit<DeckModel, "index">,
   cards: DeckCardId[]
 ): IndexModel {
+  // Plain destinations — not “story” jargon or bare numbers.
   const storyMeta: Record<DeckCardId, () => { title: string; meta: string }> = {
     you: () => ({
-      title: "You",
-      meta: model.you.empty
-        ? "Empty ledger"
-        : `${model.you.stageLabel} · ${model.you.heroValue} exact`,
+      title: "Your pulse",
+      meta: model.you.empty ? "Start here" : `${model.you.heroValue} exact`,
     }),
     map: () => ({
       title: "Canon map",
-      meta: `${model.map.measuredCount} books tested`,
+      meta: `${model.map.measuredCount} books warm`,
     }),
     far: () => ({
-      title: "Far",
-      meta: model.far.rows[0]
-        ? `${model.far.rows[0].name} · ${model.far.rows[0].metric}`
-        : "No weak books yet",
+      title: "Still far",
+      meta: model.far.rows[0]?.name ?? "Needs rounds",
     }),
     close: () => ({
-      title: "Close",
-      meta: model.close.rows[0]
-        ? `${model.close.rows[0].name} · ${model.close.rows[0].metric}`
-        : "No strong books yet",
+      title: "Already close",
+      meta: model.close.rows[0]?.name ?? "Needs rounds",
     }),
     next: () => ({
-      title: "Next checkpoint",
+      title: "Next mark",
       meta: model.next?.title ?? "All caught up",
     }),
     "marks-path": () => ({
-      title: "Marks path",
+      title: "Lifelong marks",
       meta: "Unaided · Exact · Show up",
     }),
     train: () => ({
-      title: "Train",
+      title: "Go train",
       meta: model.train.primaryLabel,
     }),
-    index: () => ({ title: "Index", meta: "You are here" }),
+    index: () => ({ title: "Here", meta: "Index" }),
   };
 
   const story: IndexStoryRow[] = cards

@@ -149,7 +149,7 @@ Two surface modes share one token set:
 | **Play** | The canon is the board | Full-bleed timeline; chrome is type-only overlay |
 | **Secondary** (home, achievements) | Progress, mastery, unlocks | Square hairline **panels** on `--surface`, narrow measure |
 
-The achievements screen is the reference for secondary UI. It is a **vertical snap deck** (story cards: You → Map → Far → Close → Next → Marks path → Train → Index) plus **full-data sheets** for complete catalogs (stats with genre/book selects, all 66 books, every ladder, earned unlocks, genres). Deck = one idea per viewport; sheets = the ledger. Prefer that pattern over inventing new card chrome.
+The achievements screen is the reference for secondary UI. It is a **flat scroll ledger**: Lifetime summary → Canon heat map → Farther/Coverage/Closer focus lists → Next checkpoint → full Unlocks log. Square hairline panels, drop-cap rows, all data on one scroll — not a story deck. Prefer that pattern over inventing new card chrome.
 
 ## Appearance
 

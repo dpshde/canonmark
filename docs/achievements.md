@@ -45,7 +45,7 @@ The main implementation files are:
 - `src/lib/storage.ts`: persisted state, normalization, migrations, durable write paths, and append-only unlock merging.
 - `src/lib/game.ts`: computes round facts and invokes the atomic storage paths before evaluating unlocks.
 - `src/lib/mastery.ts`: combines retained detail with evicted rollups.
-- `src/lib/achievements-deck-model.ts` / `src/lib/achievements-stats.ts` / `src/ui/achievements-deck.ts`: presentation deck + sheets; only display dimensions already durable above. UI chrome labels the `sight` ladder **Unaided**; formal titles stay catalog copy.
+- `src/ui/achievements-flat.ts`: flat scroll ledger (lifetime, canon map, focus lists, next, unlocks) — only display dimensions already durable above. UI chrome labels the `sight` ladder **Unaided**; formal titles stay catalog copy. Deck modules (`achievements-deck*`) remain in tree but are not the live surface.
 
 ## Existing ladders
 

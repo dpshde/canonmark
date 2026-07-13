@@ -38,8 +38,6 @@ import {
 import {
   loadTranslation,
   saveTranslation,
-  loadState,
-  markAchievementsSeen,
   unseenAchievementCount,
   type TranslationId,
 } from "./lib/storage";
@@ -58,7 +56,7 @@ import {
   themeLabel,
   type ThemePreference,
 } from "./lib/theme";
-import { renderAchievementsDeck } from "./ui/achievements-deck";
+import { renderAchievementsFlat } from "./ui/achievements-flat";
 
 // Core persistence → browser localStorage (before any loadState).
 installWebStorage();
@@ -251,17 +249,14 @@ function syncThemeButton(btn: HTMLButtonElement): void {
 /** Recolor map heat after tokens flip (inline oklch, not CSS vars). */
 function refreshMasteryHeat(): void {
   for (const btn of document.querySelectorAll<HTMLButtonElement>(
-    ".mastery-map-book, .deck-map-seg"
+    ".mastery-map-book"
   )) {
     const raw = btn.dataset.heat;
-    if (raw !== undefined) {
-      const dist = raw === "" ? null : Number(raw);
-      btn.style.background = masteryHeatColor(
-        dist == null || !Number.isFinite(dist) ? null : dist
-      );
-      continue;
-    }
-    // Deck segments store only computed color; re-open screen to retheme fully.
+    if (raw === undefined) continue;
+    const dist = raw === "" ? null : Number(raw);
+    btn.style.background = masteryHeatColor(
+      dist == null || !Number.isFinite(dist) ? null : dist
+    );
   }
 }
 
@@ -362,17 +357,11 @@ function showUnlockToast(ids: string[]): void {
 }
 
 function renderAchievements(): void {
-  markAchievementsSeen();
-  const state = loadState();
   const base = import.meta.env.BASE_URL || "./";
-  renderAchievementsDeck(app, state, {
+  // Flat ledger: lifetime, map, focus, next, unlocks — all on one scroll.
+  renderAchievementsFlat(app, {
     onHome: () => renderHome(),
     onThemeToggle: () => makeThemeToggle(),
-    onStartDaily: () => startMode("daily"),
-    onStartPractice: (_bookOsis?: string) => {
-      // Book bias is session UI only this pass; practice still uses full pool.
-      startMode("endless");
-    },
     haptic: () => hapticLight(),
     baseUrl: base,
     bindDropCap: bindDropCapSrc,

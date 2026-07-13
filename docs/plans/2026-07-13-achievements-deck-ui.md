@@ -2,7 +2,7 @@
 
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
-**Goal:** Replace the scroll-wall achievements screen with a TikTok-style vertical snap deck (story + play) plus full-data sheets (complete ledger), wired to live `mastery` / `achievements` / `storage` — keeping Versemark design tokens and never preview-only data.
+**Goal:** Replace the scroll-wall achievements screen with a Wrapped-style vertical story deck (one claim per card + top segment progress) plus full-data sheets (complete ledger), wired to live `mastery` / `achievements` / `storage` — keeping Versemark design tokens and never preview-only data.
 
 **Architecture:** Keep domain logic in `src/lib/*`. New presentation layer: `renderAchievements()` becomes a thin orchestrator over (1) a snap **deck** of cards, (2) full-screen **sheets** for complete catalogs, (3) an **Index** card as post-story home base. Pure view-model builders live in new modules so UI stays dumb and testable. No backend. State remains local `AppState`.
 
@@ -214,7 +214,7 @@ Derive only from `MasteryReport` + `listAchievements` + `effectiveLifetime` / ma
 ## CSS guidelines
 
 - Reuse CSS variables from `:root` in `styles.css`
-- New BEM-ish prefixes: `.deck`, `.deck-card`, `.deck-dots`, `.sheet`, `.trail`, `.path-tab`, `.toc-row`
+- New BEM-ish prefixes: `.deck`, `.deck-card`, `.deck-progress`, `.sheet`, `.trail`, `.path-tab`, `.toc-row`
 - Square buttons; primary = terracotta; no `border-radius` on panels except drop-cap `4px`
 - Touch targets ≥ 44px
 - Do **not** remount theme by recreating whole app incorrectly — theme toggle stays token flip
