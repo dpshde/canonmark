@@ -1,0 +1,1717 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <title>Achievements — deck proposal</title>
+  <!--
+    Interaction model: TikTok vertical snap + Tinder-style one-card focus.
+    Materials: Versemark DESIGN.md tokens (Charter, terracotta, square, no kitsch).
+    Content: skill ledger, not essay. One idea per full viewport card.
+  -->
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: oklch(0.985 0.003 50);
+      --surface: oklch(0.972 0.004 50);
+      --surface-2: oklch(0.945 0.006 50);
+      --rail: oklch(0.93 0.005 50);
+      --ink: oklch(0.27 0.008 50);
+      --ink-2: oklch(0.45 0.010 50);
+      --ink-3: oklch(0.60 0.008 50);
+      --accent: oklch(0.55 0.15 40);
+      --accent-deep: oklch(0.45 0.14 40);
+      --accent-soft: oklch(0.90 0.035 45);
+      --success: oklch(0.52 0.11 145);
+      --border: oklch(0.90 0.006 50);
+      --border-strong: oklch(0.82 0.008 50);
+      --row-rule: oklch(0.86 0.008 50);
+      --heat-close: oklch(0.84 0.055 145);
+      --heat-far: oklch(0.48 0.175 40);
+      --genre-law: oklch(0.74 0.14 145);
+      --genre-history: oklch(0.68 0.14 35);
+      --genre-poetry: oklch(0.72 0.16 305);
+      --genre-prophets: oklch(0.66 0.16 28);
+      --genre-gospels: oklch(0.72 0.14 12);
+      --genre-epistles: oklch(0.72 0.13 185);
+      --space-sm: 8px;
+      --space-md: 12px;
+      --space-lg: 16px;
+      --space-xl: 24px;
+      --space-2xl: 32px;
+      --ease: cubic-bezier(0.16, 1, 0.3, 1);
+      font-family: Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
+      color: var(--ink);
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: oklch(0.16 0.004 48);
+      --surface: oklch(0.20 0.005 48);
+      --surface-2: oklch(0.25 0.006 48);
+      --rail: oklch(0.28 0.006 48);
+      --ink: oklch(0.93 0.006 55);
+      --ink-2: oklch(0.72 0.008 50);
+      --ink-3: oklch(0.55 0.008 50);
+      --accent: oklch(0.64 0.145 38);
+      --accent-deep: oklch(0.78 0.11 42);
+      --accent-soft: oklch(0.27 0.04 38);
+      --success: oklch(0.70 0.09 148);
+      --border: oklch(0.32 0.006 48);
+      --border-strong: oklch(0.40 0.008 48);
+      --row-rule: oklch(0.28 0.005 48);
+      --heat-close: oklch(0.48 0.07 148);
+      --heat-far: oklch(0.58 0.14 38);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%;
+      background: var(--bg); color: var(--ink);
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+      touch-action: pan-y;
+    }
+
+    /* Full-viewport vertical snap deck */
+    .deck {
+      height: 100dvh;
+      overflow-y: auto;
+      scroll-snap-type: y mandatory;
+      scroll-behavior: smooth;
+      -webkit-overflow-scrolling: touch;
+    }
+    .card {
+      height: 100dvh;
+      height: 100svh;
+      scroll-snap-align: start;
+      scroll-snap-stop: always;
+      display: flex;
+      flex-direction: column;
+      padding:
+        calc(52px + env(safe-area-inset-top))
+        var(--space-xl)
+        calc(56px + env(safe-area-inset-bottom));
+      position: relative;
+    }
+
+    /* Sticky chrome */
+    .chrome {
+      position: fixed;
+      inset: 0 0 auto 0;
+      z-index: 10;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      min-height: 44px;
+      padding: calc(var(--space-sm) + env(safe-area-inset-top)) var(--space-lg) var(--space-sm);
+      background: color-mix(in oklch, var(--bg) 88%, transparent);
+      backdrop-filter: blur(8px);
+      pointer-events: none;
+    }
+    .chrome h1 {
+      margin: 0; grid-column: 2; text-align: center;
+      font-size: 0.82rem; font-weight: 600;
+      font-variant-caps: all-small-caps; letter-spacing: 0.08em;
+    }
+    .chrome .actions {
+      grid-column: 3; justify-self: end;
+      display: flex; pointer-events: auto;
+    }
+    .ghost {
+      appearance: none; border: 0; background: transparent;
+      color: var(--ink-3); min-width: 40px; min-height: 44px;
+      cursor: pointer; font: inherit;
+    }
+    .ghost:hover { color: var(--ink); }
+
+    /* Progress dots — TikTok-ish index */
+    .dots {
+      position: fixed;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .dots button {
+      appearance: none; border: 0; padding: 0;
+      width: 6px; height: 6px; border-radius: 0;
+      background: var(--border-strong); cursor: pointer;
+      transition: height 0.2s var(--ease), background 0.2s var(--ease);
+    }
+    .dots button.on {
+      height: 18px;
+      background: var(--accent);
+    }
+
+    /* Card chrome */
+    .kicker {
+      margin: 0 0 var(--space-md);
+      font-size: 0.72rem; font-weight: 600;
+      font-variant-caps: all-small-caps; letter-spacing: 0.1em;
+      color: var(--ink-3);
+    }
+    .headline {
+      margin: 0;
+      font-size: clamp(1.55rem, 6.5vw, 2rem);
+      font-weight: 600;
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+      max-width: 16ch;
+      text-wrap: balance;
+    }
+    .sub {
+      margin: var(--space-md) 0 0;
+      font-size: 1rem;
+      color: var(--ink-2);
+      line-height: 1.45;
+      max-width: 28ch;
+    }
+    .grow { flex: 1; display: flex; flex-direction: column; justify-content: center; min-height: 0; }
+    .foot {
+      margin-top: auto;
+      padding-top: var(--space-lg);
+    }
+    .hint-swipe {
+      text-align: center;
+      font-size: 0.72rem;
+      font-variant-caps: all-small-caps;
+      letter-spacing: 0.08em;
+      color: var(--ink-3);
+      animation: pulse 2.2s var(--ease) infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.45; }
+      50% { opacity: 1; }
+    }
+
+    /* Big stat */
+    .big-stat {
+      margin: var(--space-2xl) 0 var(--space-sm);
+      font-size: clamp(3.5rem, 18vw, 5rem);
+      font-weight: 700;
+      line-height: 0.95;
+      letter-spacing: -0.03em;
+      font-variant-numeric: lining-nums tabular-nums;
+      color: var(--accent-deep);
+    }
+    .big-stat-unit {
+      display: block;
+      margin-top: var(--space-sm);
+      font-size: 0.95rem;
+      font-weight: 500;
+      color: var(--ink-2);
+      letter-spacing: 0;
+    }
+    .chip-row {
+      display: flex; flex-wrap: wrap; gap: var(--space-sm);
+      margin-top: var(--space-xl);
+    }
+    .chip {
+      padding: 8px 12px;
+      border: 1px solid var(--border-strong);
+      background: var(--surface);
+      font-size: 0.88rem;
+      font-variant-numeric: lining-nums tabular-nums;
+      color: var(--ink-2);
+    }
+    .chip strong { color: var(--ink); font-weight: 600; }
+
+    /* Interactive map — the fun board */
+    .map-stage {
+      width: 100%;
+      max-width: 22rem;
+      margin: 0 auto;
+    }
+    .map-rail {
+      display: flex;
+      height: 72px;
+      width: 100%;
+      background: var(--surface-2);
+      border: 1px solid var(--border-strong);
+      touch-action: manipulation;
+      user-select: none;
+    }
+    .map-seg {
+      flex: 1 1 0;
+      min-width: 4px;
+      border: 0;
+      padding: 0;
+      margin: 0;
+      appearance: none;
+      cursor: pointer;
+      position: relative;
+      transition: filter 0.15s ease, box-shadow 0.15s ease;
+    }
+    .map-seg:active { filter: brightness(0.92); }
+    .map-seg.is-on {
+      box-shadow: inset 0 0 0 2px var(--accent-deep);
+      z-index: 1;
+    }
+    .map-ends {
+      display: flex; justify-content: space-between;
+      margin-top: 8px;
+      font-size: 0.72rem;
+      font-variant-caps: all-small-caps;
+      letter-spacing: 0.06em;
+      color: var(--ink-3);
+    }
+    .map-readout {
+      margin-top: var(--space-xl);
+      min-height: 5.5rem;
+      text-align: center;
+    }
+    .map-readout .name {
+      margin: 0;
+      font-size: 1.5rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .map-readout .metric {
+      margin: 6px 0 0;
+      font-size: 1.05rem;
+      color: var(--ink-2);
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    .map-readout .tap {
+      margin: var(--space-md) 0 0;
+      font-size: 0.78rem;
+      color: var(--ink-3);
+      font-variant-caps: all-small-caps;
+      letter-spacing: 0.06em;
+    }
+    .legend {
+      display: flex; align-items: center; gap: 10px;
+      margin-top: var(--space-lg);
+      font-size: 0.68rem;
+      font-variant-caps: all-small-caps;
+      letter-spacing: 0.06em;
+      color: var(--ink-3);
+    }
+    .legend i {
+      flex: 1; height: 3px; font-style: normal;
+      background: linear-gradient(to right, var(--heat-close), var(--heat-far));
+    }
+
+    /* Tinder-ish choice row on weak/close cards */
+    .choice-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      width: 100%;
+      max-width: 22rem;
+      margin: 0 auto;
+    }
+    .choice {
+      appearance: none;
+      width: 100%;
+      min-height: 64px;
+      padding: 14px 16px;
+      border: 1px solid var(--border-strong);
+      background: var(--surface);
+      color: var(--ink);
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s var(--ease);
+    }
+    .choice:active { transform: scale(0.985); }
+    .choice.is-pick {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .choice .l { font-weight: 600; font-size: 1.05rem; }
+    .choice .r {
+      font-size: 0.9rem; color: var(--ink-2);
+      font-variant-numeric: lining-nums tabular-nums;
+      white-space: nowrap;
+    }
+    .choice .heat {
+      width: 10px; height: 10px; flex: 0 0 auto;
+      margin-right: 8px;
+    }
+
+    /* Next mark as challenge card */
+    .mark-face {
+      width: min(100%, 16rem);
+      margin: 0 auto;
+      border: 1px solid var(--border-strong);
+      background: var(--surface);
+      padding: var(--space-2xl) var(--space-xl);
+      text-align: center;
+    }
+    .drop {
+      width: 4rem; height: 4rem; margin: 0 auto var(--space-lg);
+      background: #c45a1a; color: #fff;
+      display: grid; place-items: center;
+      font-size: 1.75rem; font-weight: 700;
+      border-radius: 4px;
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, #9a3f0e 50%, transparent);
+    }
+    .mark-face h2 {
+      margin: 0;
+      font-size: 1.35rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .mark-face p {
+      margin: 8px 0 0;
+      color: var(--ink-2);
+      font-size: 0.95rem;
+      line-height: 1.4;
+    }
+    .progress {
+      margin: var(--space-xl) auto 0;
+      max-width: 12rem;
+      height: 4px;
+      background: var(--surface-2);
+    }
+    .progress > i {
+      display: block; height: 100%;
+      background: var(--accent);
+      font-style: normal;
+    }
+    .progress-label {
+      margin-top: 8px;
+      font-size: 0.85rem;
+      color: var(--ink-2);
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+
+    /* Buttons */
+    .btn {
+      appearance: none;
+      width: 100%;
+      min-height: 48px;
+      padding: 0.75rem 1.25rem;
+      border-radius: 0;
+      font: inherit;
+      font-size: 1.05rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+    }
+    .btn-primary {
+      background: var(--accent); color: #fff; border-color: var(--accent);
+    }
+    .btn-primary:hover { background: var(--accent-deep); }
+    .btn-secondary {
+      background: transparent; color: var(--ink-2);
+      border-color: var(--border-strong); font-weight: 500;
+    }
+    .btn-row {
+      display: flex; flex-direction: column; gap: 10px;
+      max-width: 22rem; margin: 0 auto; width: 100%;
+    }
+
+    /* Stage strip */
+    .stage {
+      display: inline-block;
+      margin-top: var(--space-lg);
+      font-size: 0.72rem;
+      font-weight: 600;
+      font-variant-caps: all-small-caps;
+      letter-spacing: 0.08em;
+      color: var(--ink-3);
+    }
+
+    .react-note {
+      margin-top: var(--space-md);
+      min-height: 1.3em;
+      font-size: 0.95rem;
+      color: var(--accent-deep);
+      font-weight: 600;
+      text-align: center;
+    }
+
+    /* Final card — table of contents */
+    .toc {
+      width: 100%;
+      max-width: 22rem;
+      margin: 0 auto;
+      border-top: 1px solid var(--row-rule);
+    }
+    .toc-row {
+      appearance: none;
+      width: 100%;
+      min-height: 52px;
+      padding: 14px 0;
+      border: 0;
+      border-bottom: 1px solid var(--row-rule);
+      background: transparent;
+      color: var(--ink);
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      transition: color 0.15s ease;
+    }
+    .toc-row:active { color: var(--accent-deep); }
+    .toc-row .n {
+      flex: 0 0 1.25rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      font-variant-numeric: lining-nums tabular-nums;
+      color: var(--ink-3);
+    }
+    .toc-row .t {
+      flex: 1;
+      font-size: 1.05rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .toc-row .m {
+      flex: 0 1 auto;
+      font-size: 0.82rem;
+      color: var(--ink-2);
+      font-variant-numeric: lining-nums tabular-nums;
+      text-align: right;
+      max-width: 42%;
+    }
+    .toc-row:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .toc-actions {
+      margin-top: var(--space-xl);
+      max-width: 22rem;
+      margin-inline: auto;
+      width: 100%;
+    }
+
+    /* Lifelong marks — skill paths + checkpoint trail */
+    .path-tabs {
+      display: flex;
+      gap: 0;
+      width: 100%;
+      max-width: 22rem;
+      margin: 0 auto var(--space-xl);
+      border: 1px solid var(--border-strong);
+      background: var(--surface);
+    }
+    .path-tab {
+      flex: 1;
+      appearance: none;
+      border: 0;
+      border-right: 1px solid var(--border);
+      background: transparent;
+      color: var(--ink-3);
+      font: inherit;
+      font-size: 0.72rem;
+      font-weight: 600;
+      font-variant-caps: all-small-caps;
+      letter-spacing: 0.06em;
+      min-height: 44px;
+      cursor: pointer;
+      padding: 8px 4px;
+    }
+    .path-tab:last-child { border-right: 0; }
+    .path-tab.is-on {
+      color: var(--accent-deep);
+      background: var(--accent-soft);
+    }
+    .trail {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 4px;
+      width: 100%;
+      max-width: 22rem;
+      margin: 0 auto;
+      position: relative;
+      padding: 0 2px;
+    }
+    .trail::before {
+      content: "";
+      position: absolute;
+      left: 8%;
+      right: 8%;
+      top: 15px;
+      height: 2px;
+      background: var(--row-rule);
+      z-index: 0;
+    }
+    .node {
+      flex: 1;
+      appearance: none;
+      border: 0;
+      background: transparent;
+      padding: 0;
+      margin: 0;
+      cursor: pointer;
+      font: inherit;
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .node .dot {
+      width: 32px;
+      height: 32px;
+      border-radius: 4px;
+      border: 2px solid var(--border-strong);
+      background: var(--bg);
+      display: grid;
+      place-items: center;
+      font-size: 0.7rem;
+      font-weight: 700;
+      font-variant-numeric: lining-nums;
+      color: var(--ink-3);
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+    .node.is-done .dot {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .node.is-now .dot {
+      background: var(--accent-soft);
+      border-color: var(--accent-deep);
+      color: var(--accent-deep);
+      box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
+    }
+    .node.is-pick .dot {
+      border-color: var(--accent-deep);
+    }
+    .node .lbl {
+      font-size: 0.62rem;
+      font-weight: 600;
+      font-variant-caps: all-small-caps;
+      letter-spacing: 0.04em;
+      color: var(--ink-3);
+      text-align: center;
+      line-height: 1.2;
+      max-width: 4.2rem;
+    }
+    .node.is-now .lbl,
+    .node.is-pick .lbl { color: var(--ink-2); }
+    .node.is-done .lbl { color: var(--ink-2); }
+    .checkpoint-face {
+      width: min(100%, 20rem);
+      margin: var(--space-xl) auto 0;
+      border: 1px solid var(--border-strong);
+      background: var(--surface);
+      padding: var(--space-xl) var(--space-lg);
+      text-align: center;
+      min-height: 9.5rem;
+    }
+    .checkpoint-face .status {
+      margin: 0 0 8px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      font-variant-caps: all-small-caps;
+      letter-spacing: 0.08em;
+      color: var(--ink-3);
+    }
+    .checkpoint-face .status.is-done { color: var(--accent-deep); }
+    .checkpoint-face .status.is-now { color: var(--accent-deep); }
+    .checkpoint-face h3 {
+      margin: 0;
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .checkpoint-face p {
+      margin: 8px 0 0;
+      font-size: 0.92rem;
+      color: var(--ink-2);
+      line-height: 1.4;
+    }
+    .checkpoint-face .progress { margin-top: var(--space-lg); }
+    .life-note {
+      margin: var(--space-lg) auto 0;
+      max-width: 22rem;
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--ink-3);
+      line-height: 1.4;
+    }
+
+
+    /* Full-data sheets — complete catalogs, not previews */
+    .sheet {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      background: var(--bg);
+      display: none;
+      flex-direction: column;
+      padding:
+        calc(8px + env(safe-area-inset-top))
+        var(--space-lg)
+        calc(16px + env(safe-area-inset-bottom));
+      overflow: hidden;
+    }
+    .sheet.is-open { display: flex; }
+    .sheet-top {
+      display: grid;
+      grid-template-columns: 44px 1fr 44px;
+      align-items: center;
+      min-height: 44px;
+      margin-bottom: var(--space-md);
+      flex-shrink: 0;
+    }
+    .sheet-top h2 {
+      margin: 0;
+      text-align: center;
+      font-size: 0.82rem;
+      font-weight: 600;
+      font-variant-caps: all-small-caps;
+      letter-spacing: 0.08em;
+    }
+    .sheet-body {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: var(--space-2xl);
+    }
+    .sheet-lead {
+      margin: 0 0 var(--space-lg);
+      font-size: 1.15rem;
+      font-weight: 600;
+      line-height: 1.35;
+      letter-spacing: -0.01em;
+      max-width: 28ch;
+    }
+    .sheet-note {
+      margin: 0 0 var(--space-xl);
+      font-size: 0.88rem;
+      color: var(--ink-2);
+      line-height: 1.45;
+    }
+    .data-table {
+      width: 100%;
+      max-width: 24rem;
+      margin: 0 auto;
+      border-top: 1px solid var(--row-rule);
+    }
+    .data-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--row-rule);
+      font-size: 0.95rem;
+      line-height: 1.35;
+    }
+    .data-row .k { color: var(--ink); font-weight: 500; min-width: 0; }
+    .data-row .v {
+      color: var(--ink-2);
+      font-variant-numeric: lining-nums tabular-nums;
+      text-align: right;
+      flex-shrink: 0;
+      max-width: 48%;
+    }
+    .data-row.is-done .k { color: var(--accent-deep); }
+    .data-row.is-now .k { font-weight: 600; }
+    .data-row.is-now .v { color: var(--accent-deep); font-weight: 600; }
+    .group-h {
+      margin: var(--space-xl) 0 var(--space-sm);
+      font-size: 0.72rem;
+      font-weight: 600;
+      font-variant-caps: all-small-caps;
+      letter-spacing: 0.08em;
+      color: var(--ink-3);
+    }
+    .group-h:first-child { margin-top: 0; }
+    .linkish {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--accent-deep);
+      font: inherit;
+      font-size: 0.82rem;
+      font-weight: 600;
+      font-variant-caps: all-small-caps;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      padding: 10px 0;
+      min-height: 44px;
+      text-align: center;
+      width: 100%;
+    }
+    .linkish:hover { color: var(--accent); }
+    .toc-section {
+      margin: var(--space-xl) 0 var(--space-sm);
+      font-size: 0.72rem;
+      font-weight: 600;
+      font-variant-caps: all-small-caps;
+      letter-spacing: 0.08em;
+      color: var(--ink-3);
+    }
+    .deck.is-locked { overflow: hidden; }
+
+    .picker-row {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 0 0 var(--space-lg);
+      max-width: 24rem;
+    }
+    .picker-row label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      font-variant-caps: all-small-caps;
+      letter-spacing: 0.08em;
+      color: var(--ink-3);
+    }
+    .picker-row select {
+      appearance: none;
+      width: 100%;
+      min-height: 44px;
+      padding: 10px 12px;
+      border: 1px solid var(--border-strong);
+      border-radius: 0;
+      background: var(--surface);
+      color: var(--ink);
+      font: inherit;
+      font-size: 1rem;
+      font-weight: 500;
+    }
+    .picker-row select:focus {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .detail-panel {
+      margin: 0 0 var(--space-xl);
+      padding: var(--space-lg) 0 0;
+      border-top: 1px solid var(--row-rule);
+      max-width: 24rem;
+    }
+    .detail-panel h3 {
+      margin: 0 0 4px;
+      font-size: 1.2rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .detail-panel .detail-sub {
+      margin: 0 0 var(--space-md);
+      font-size: 0.88rem;
+      color: var(--ink-2);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .hint-swipe { animation: none; }
+      .deck { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header class="chrome">
+    <div></div>
+    <h1>Achievements</h1>
+    <div class="actions">
+      <button type="button" class="ghost" aria-label="Theme" onclick="toggleTheme()">◐</button>
+      <button type="button" class="ghost" aria-label="Home">⌂</button>
+    </div>
+  </header>
+
+  <nav class="dots" id="dots" aria-label="Cards"></nav>
+
+  <main class="deck" id="deck">
+    <!-- 0 · Pulse — one sentence, one number -->
+    <section class="card" data-i="0" aria-label="Your pulse">
+      <p class="kicker">You</p>
+      <div class="grow">
+        <h2 class="headline">Books: getting it. Verses: still rare.</h2>
+        <p class="big-stat">41%<span class="big-stat-unit">exact · from your Dailies</span></p>
+        <div class="chip-row">
+          <span class="chip"><strong>18%</strong> unaided</span>
+          <span class="chip"><strong>23</strong>/66 books</span>
+          <span class="chip"><strong>~12</strong> ch off</span>
+        </div>
+        <span class="stage">Getting oriented</span>
+        <button type="button" class="linkish" data-sheet="stats">Full stats · every metric</button>
+      </div>
+      <div class="foot"><p class="hint-swipe">Swipe up</p></div>
+    </section>
+
+    <!-- 1 · Map playground -->
+    <section class="card" data-i="1" aria-label="Canon map">
+      <p class="kicker">The canon · tap a band</p>
+      <div class="grow">
+        <div class="map-stage">
+          <div class="map-rail" id="map-rail" role="listbox" aria-label="Books by heat"></div>
+          <div class="map-ends"><span>Genesis</span><span>Revelation</span></div>
+          <div class="legend"><span>Closer</span><i></i><span>Farther</span></div>
+          <div class="map-readout" id="map-readout">
+            <p class="name">—</p>
+            <p class="metric"></p>
+            <p class="tap">Tap any segment</p>
+          </div>
+          <button type="button" class="linkish" data-sheet="books">All 66 books · complete</button>
+        </div>
+      </div>
+      <div class="foot"><p class="hint-swipe">Swipe up</p></div>
+    </section>
+
+    <!-- 2 · Far stack — Tinder pick -->
+    <section class="card" data-i="2" aria-label="Often far">
+      <p class="kicker">Often far · pick one to train</p>
+      <div class="grow">
+        <h2 class="headline" style="max-width:12ch; margin-bottom: var(--space-xl)">Where you miss longest</h2>
+        <div class="choice-stack" id="far-choices">
+          <button type="button" class="choice" data-book="Leviticus" data-m="~14 chapters off">
+            <span style="display:flex;align-items:center"><span class="heat" style="background:var(--heat-far)"></span><span class="l">Leviticus</span></span>
+            <span class="r">~14 ch off</span>
+          </button>
+          <button type="button" class="choice" data-book="Genesis" data-m="~8 chapters off">
+            <span style="display:flex;align-items:center"><span class="heat" style="background:color-mix(in oklch,var(--heat-far) 70%, var(--heat-close))"></span><span class="l">Genesis</span></span>
+            <span class="r">~8 ch off</span>
+          </button>
+          <button type="button" class="choice" data-book="1 John" data-m="~6 chapters off">
+            <span style="display:flex;align-items:center"><span class="heat" style="background:color-mix(in oklch,var(--heat-far) 45%, var(--heat-close))"></span><span class="l">1 John</span></span>
+            <span class="r">~6 ch off</span>
+          </button>
+        </div>
+        <p class="react-note" id="far-note" aria-live="polite"></p>
+        <button type="button" class="linkish" data-sheet="books" data-filter="far">Full far list · every book</button>
+      </div>
+      <div class="foot"><p class="hint-swipe">Swipe up</p></div>
+    </section>
+
+    <!-- 3 · Close stack -->
+    <section class="card" data-i="3" aria-label="Usually close">
+      <p class="kicker">Usually close · your strengths</p>
+      <div class="grow">
+        <h2 class="headline" style="max-width:11ch; margin-bottom: var(--space-xl)">You already land near</h2>
+        <div class="choice-stack">
+          <div class="choice" style="cursor:default">
+            <span style="display:flex;align-items:center"><span class="heat" style="background:var(--heat-close)"></span><span class="l">Psalms</span></span>
+            <span class="r">~2 ch</span>
+          </div>
+          <div class="choice" style="cursor:default">
+            <span style="display:flex;align-items:center"><span class="heat" style="background:var(--heat-close)"></span><span class="l">John</span></span>
+            <span class="r">same ch often</span>
+          </div>
+          <div class="choice" style="cursor:default">
+            <span style="display:flex;align-items:center"><span class="heat" style="background:var(--success)"></span><span class="l">Romans</span></span>
+            <span class="r">tight</span>
+          </div>
+        </div>
+        <p class="sub" style="margin-inline:auto;text-align:center;margin-top:var(--space-xl)">No homework here — just proof the map is lighting up.</p>
+        <button type="button" class="linkish" data-sheet="books" data-filter="close">Full close list · every book</button>
+      </div>
+      <div class="foot"><p class="hint-swipe">Swipe up</p></div>
+    </section>
+
+    <!-- 4 · Next mark — immediate checkpoint -->
+    <section class="card" data-i="4" aria-label="Next mark">
+      <p class="kicker">Next checkpoint</p>
+      <div class="grow">
+        <div class="mark-face">
+          <div class="drop" aria-hidden="true">U</div>
+          <h2>Unaided exact ×10</h2>
+          <p>Land true with no hints — ten times.</p>
+          <div class="progress" aria-hidden="true"><i style="width:30%"></i></div>
+          <p class="progress-label">3 / 10</p>
+        </div>
+        <p class="sub" style="margin-inline:auto;text-align:center;margin-top:var(--space-xl)">
+          One step on a lifelong trail. Swipe for the full path.
+        </p>
+      </div>
+      <div class="foot"><p class="hint-swipe">Swipe up</p></div>
+    </section>
+
+    <!-- 5 · Lifelong marks — paths + trail -->
+    <section class="card" data-i="5" aria-label="Lifelong marks">
+      <p class="kicker">Marks · lifelong</p>
+      <div class="grow" style="justify-content: flex-start; padding-top: var(--space-sm)">
+        <h2 class="headline" style="max-width: 14ch; margin-bottom: var(--space-lg)">Checkpoints on the way</h2>
+        <div class="path-tabs" role="tablist" aria-label="Skill paths">
+          <button type="button" class="path-tab is-on" data-path="unaided" role="tab" aria-selected="true">Unaided</button>
+          <button type="button" class="path-tab" data-path="exact" role="tab" aria-selected="false">Exact</button>
+          <button type="button" class="path-tab" data-path="show" role="tab" aria-selected="false">Show up</button>
+        </div>
+        <div class="trail" id="trail" role="list" aria-label="Checkpoints"></div>
+        <div class="checkpoint-face" id="checkpoint-face" aria-live="polite">
+          <p class="status is-now">Now</p>
+          <h3>—</h3>
+          <p></p>
+          <div class="progress" hidden><i style="width:0%"></i></div>
+          <p class="progress-label" hidden></p>
+        </div>
+        <p class="life-note">Learning the canon is decades long. Marks are waystations — not the finish.</p>
+        <button type="button" class="linkish" id="see-all-marks" data-sheet="marks">All marks on this path · complete</button>
+        <button type="button" class="linkish" data-sheet="marks-all">Every mark · all paths</button>
+      </div>
+      <div class="foot"><p class="hint-swipe">Swipe up</p></div>
+    </section>
+
+    <!-- 6 · Action — Practice / Daily -->
+    <section class="card" data-i="6" aria-label="Train">
+      <p class="kicker">Do something</p>
+      <div class="grow">
+        <h2 class="headline" id="train-headline">Train the gap</h2>
+        <p class="sub" id="train-sub">Unlimited Practice rounds aimed at unaided exacts — or keep the free Daily cadence.</p>
+      </div>
+      <div class="foot">
+        <div class="btn-row">
+          <button type="button" class="btn btn-primary" id="cta-train">Train unaided exacts</button>
+          <button type="button" class="btn btn-secondary">Play today’s Daily</button>
+        </div>
+        <p class="hint-swipe" style="margin-top: var(--space-lg)">Swipe up for index</p>
+      </div>
+    </section>
+
+    <!-- 7 · Index / TOC -->
+    <section class="card" data-i="7" aria-label="Index">
+      <p class="kicker">Index</p>
+      <div class="grow" style="justify-content: flex-start; padding-top: var(--space-md)">
+        <h2 class="headline" style="max-width: 12ch; margin-bottom: var(--space-xl)">Jump anywhere</h2>
+        <nav class="toc" aria-label="Achievements pages">
+          <button type="button" class="toc-row" data-goto="0">
+            <span class="n">1</span>
+            <span class="t">You</span>
+            <span class="m">41% exact</span>
+          </button>
+          <button type="button" class="toc-row" data-goto="1">
+            <span class="n">2</span>
+            <span class="t">Canon map</span>
+            <span class="m">tap bands</span>
+          </button>
+          <button type="button" class="toc-row" data-goto="2">
+            <span class="n">3</span>
+            <span class="t">Often far</span>
+            <span class="m">train picks</span>
+          </button>
+          <button type="button" class="toc-row" data-goto="3">
+            <span class="n">4</span>
+            <span class="t">Usually close</span>
+            <span class="m">strengths</span>
+          </button>
+          <button type="button" class="toc-row" data-goto="4">
+            <span class="n">5</span>
+            <span class="t">Next checkpoint</span>
+            <span class="m">3 / 10</span>
+          </button>
+          <button type="button" class="toc-row" data-goto="5">
+            <span class="n">6</span>
+            <span class="t">Marks path</span>
+            <span class="m">lifelong</span>
+          </button>
+          <button type="button" class="toc-row" data-goto="6">
+            <span class="n">7</span>
+            <span class="t">Train</span>
+            <span class="m" id="toc-train-meta">unaided</span>
+          </button>
+        </nav>
+        <p class="toc-section">Full data · nothing held back</p>
+        <nav class="toc" aria-label="Complete data">
+          <button type="button" class="toc-row" data-sheet="stats">
+            <span class="n">·</span>
+            <span class="t">All stats</span>
+            <span class="m">every metric</span>
+          </button>
+          <button type="button" class="toc-row" data-sheet="books">
+            <span class="n">·</span>
+            <span class="t">All books</span>
+            <span class="m">66</span>
+          </button>
+          <button type="button" class="toc-row" data-sheet="marks-all">
+            <span class="n">·</span>
+            <span class="t">All marks</span>
+            <span class="m">every path</span>
+          </button>
+          <button type="button" class="toc-row" data-sheet="earned">
+            <span class="n">·</span>
+            <span class="t">Earned log</span>
+            <span class="m">passed only</span>
+          </button>
+          <button type="button" class="toc-row" data-sheet="genres">
+            <span class="n">·</span>
+            <span class="t">All genres</span>
+            <span class="m">6</span>
+          </button>
+        </nav>
+        <div class="toc-actions btn-row">
+          <button type="button" class="btn btn-primary" id="cta-train-toc">Train unaided exacts</button>
+          <button type="button" class="btn btn-secondary">Play today’s Daily</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Full-data sheets -->
+  <div class="sheet" id="sheet-stats" role="dialog" aria-modal="true" aria-labelledby="sheet-stats-title">
+    <div class="sheet-top">
+      <button type="button" class="ghost sheet-close" aria-label="Close">←</button>
+      <h2 id="sheet-stats-title">All stats</h2>
+      <span></span>
+    </div>
+    <div class="sheet-body" id="sheet-stats-body"></div>
+  </div>
+  <div class="sheet" id="sheet-books" role="dialog" aria-modal="true" aria-labelledby="sheet-books-title">
+    <div class="sheet-top">
+      <button type="button" class="ghost sheet-close" aria-label="Close">←</button>
+      <h2 id="sheet-books-title">All books</h2>
+      <span></span>
+    </div>
+    <div class="sheet-body" id="sheet-books-body"></div>
+  </div>
+  <div class="sheet" id="sheet-marks" role="dialog" aria-modal="true" aria-labelledby="sheet-marks-title">
+    <div class="sheet-top">
+      <button type="button" class="ghost sheet-close" aria-label="Close">←</button>
+      <h2 id="sheet-marks-title">Marks</h2>
+      <span></span>
+    </div>
+    <div class="sheet-body" id="sheet-marks-body"></div>
+  </div>
+  <div class="sheet" id="sheet-marks-all" role="dialog" aria-modal="true" aria-labelledby="sheet-marks-all-title">
+    <div class="sheet-top">
+      <button type="button" class="ghost sheet-close" aria-label="Close">←</button>
+      <h2 id="sheet-marks-all-title">All marks</h2>
+      <span></span>
+    </div>
+    <div class="sheet-body" id="sheet-marks-all-body"></div>
+  </div>
+  <div class="sheet" id="sheet-earned" role="dialog" aria-modal="true" aria-labelledby="sheet-earned-title">
+    <div class="sheet-top">
+      <button type="button" class="ghost sheet-close" aria-label="Close">←</button>
+      <h2 id="sheet-earned-title">Earned</h2>
+      <span></span>
+    </div>
+    <div class="sheet-body" id="sheet-earned-body"></div>
+  </div>
+  <div class="sheet" id="sheet-genres" role="dialog" aria-modal="true" aria-labelledby="sheet-genres-title">
+    <div class="sheet-top">
+      <button type="button" class="ghost sheet-close" aria-label="Close">←</button>
+      <h2 id="sheet-genres-title">Genres</h2>
+      <span></span>
+    </div>
+    <div class="sheet-body" id="sheet-genres-body"></div>
+  </div>
+
+  <script>
+    const books = [
+      { name: "Genesis", m: "~8 chapters off · 5 rounds", c: "var(--heat-far)", f: 3 },
+      { name: "Exodus", m: "~5 chapters off", c: "color-mix(in oklch, var(--heat-far) 55%, var(--heat-close))", f: 2 },
+      { name: "—", m: "not tested", c: "var(--rail)", f: 1 },
+      { name: "Psalms", m: "~2 chapters off · close", c: "var(--heat-close)", f: 2 },
+      { name: "—", m: "not tested", c: "var(--rail)", f: 1 },
+      { name: "Isaiah", m: "~4 chapters off", c: "color-mix(in oklch, var(--heat-far) 35%, var(--heat-close))", f: 2 },
+      { name: "John", m: "same chapter often", c: "var(--genre-gospels)", f: 1 },
+      { name: "Romans", m: "tight", c: "var(--genre-epistles)", f: 2 },
+      { name: "—", m: "not tested", c: "var(--rail)", f: 1 },
+    ];
+
+    // Full canon book catalog (complete — mock heat for demo)
+    const ALL_BOOKS = [
+      ["Genesis","law",8,5],["Exodus","law",5,3],["Leviticus","law",14,2],["Numbers","law",null,0],["Deuteronomy","law",6,2],
+      ["Joshua","history",null,0],["Judges","history",null,0],["Ruth","history",3,1],["1 Samuel","history",null,0],["2 Samuel","history",null,0],
+      ["1 Kings","history",null,0],["2 Kings","history",null,0],["1 Chronicles","history",null,0],["2 Chronicles","history",null,0],
+      ["Ezra","history",null,0],["Nehemiah","history",null,0],["Esther","history",null,0],
+      ["Job","poetry",9,1],["Psalms","poetry",2,8],["Proverbs","poetry",4,3],["Ecclesiastes","poetry",null,0],["Song of Songs","poetry",null,0],
+      ["Isaiah","prophets",4,2],["Jeremiah","prophets",null,0],["Lamentations","prophets",null,0],["Ezekiel","prophets",null,0],["Daniel","prophets",5,1],
+      ["Hosea","prophets",null,0],["Joel","prophets",null,0],["Amos","prophets",null,0],["Obadiah","prophets",null,0],["Jonah","prophets",2,1],
+      ["Micah","prophets",null,0],["Nahum","prophets",null,0],["Habakkuk","prophets",null,0],["Zephaniah","prophets",null,0],["Haggai","prophets",null,0],
+      ["Zechariah","prophets",null,0],["Malachi","prophets",null,0],
+      ["Matthew","gospels",3,4],["Mark","gospels",2,2],["Luke","gospels",4,2],["John","gospels",1,6],
+      ["Acts","history",7,2],
+      ["Romans","epistles",1,5],["1 Corinthians","epistles",3,2],["2 Corinthians","epistles",null,0],["Galatians","epistles",2,1],
+      ["Ephesians","epistles",2,2],["Philippians","epistles",1,2],["Colossians","epistles",null,0],
+      ["1 Thessalonians","epistles",null,0],["2 Thessalonians","epistles",null,0],["1 Timothy","epistles",null,0],["2 Timothy","epistles",null,0],
+      ["Titus","epistles",null,0],["Philemon","epistles",null,0],["Hebrews","epistles",5,1],["James","epistles",3,1],
+      ["1 Peter","epistles",null,0],["2 Peter","epistles",null,0],["1 John","epistles",6,2],["2 John","epistles",null,0],["3 John","epistles",null,0],
+      ["Jude","epistles",null,0],["Revelation","prophets",10,1],
+    ].map(([name, genre, chOff, rounds]) => {
+      const tested = rounds > 0;
+      const exacts = tested ? Math.max(0, Math.round(rounds * (chOff <= 2 ? 0.55 : 0.25))) : 0;
+      const closes = tested ? Math.max(0, rounds - exacts) : 0;
+      const unaided = tested ? Math.max(0, Math.round(exacts * (chOff <= 2 ? 0.4 : 0.15))) : 0;
+      const sameCh = tested ? Math.max(exacts, Math.round(rounds * (chOff <= 2 ? 0.7 : 0.35))) : 0;
+      const hints = tested ? Math.max(0, rounds - unaided) : 0;
+      return {
+        name, genre, chOff, rounds, exacts, closes, unaided, sameCh, hints,
+        m: !tested ? "not tested" : (chOff <= 2 ? `~${chOff} ch off · close` : `~${chOff} chapters off · ${rounds} rounds`),
+        band: !tested ? "untested" : chOff <= 2 ? "close" : "far",
+        exactRate: !tested ? null : Math.round((exacts / rounds) * 100),
+        medianMiss: chOff,
+      };
+    });
+    console.assert(ALL_BOOKS.length === 66, "book count", ALL_BOOKS.length);
+
+    const GENRES = [
+      { name: "Law", key: "law", miss: "~8 ch" },
+      { name: "History", key: "history", miss: "~7 ch" },
+      { name: "Poetry", key: "poetry", miss: "~3 ch" },
+      { name: "Prophets", key: "prophets", miss: "~5 ch" },
+      { name: "Gospels", key: "gospels", miss: "~2 ch" },
+      { name: "Epistles", key: "epistles", miss: "~2 ch" },
+    ];
+
+    const FULL_STATS = [
+      ["Exact landings", "12"],
+      ["Exact rate", "41%"],
+      ["Unaided exacts", "3"],
+      ["Unaided rate (of exacts)", "18%"],
+      ["Close landings", "18"],
+      ["Same-chapter landings", "28"],
+      ["Chapter rate", "74%"],
+      ["Hints used (lifetime)", "22"],
+      ["Rounds with ≥1 hint", "61%"],
+      ["Clean sheets", "2"],
+      ["Dailies completed", "15"],
+      ["Practice rounds", "32"],
+      ["Total marks (verses scored)", "47"],
+      ["Books tested", "23 of 66"],
+      ["Books untested", "43 of 66"],
+      ["Median miss (chapters)", "~12"],
+      ["Best streak (days)", "7"],
+      ["Current streak", "4"],
+      ["Stage", "Getting oriented"],
+      ["Marks unlocked", "9"],
+      ["Marks remaining", "full ladders open"],
+    ];
+
+
+    const rail = document.getElementById("map-rail");
+    const readout = document.getElementById("map-readout");
+    books.forEach((b, i) => {
+      const el = document.createElement("button");
+      el.type = "button";
+      el.className = "map-seg";
+      el.style.flex = String(b.f);
+      el.style.background = b.c;
+      el.setAttribute("role", "option");
+      el.setAttribute("aria-label", b.name === "—" ? "Untested stretch" : b.name);
+      el.addEventListener("click", () => {
+        rail.querySelectorAll(".map-seg").forEach((s) => s.classList.remove("is-on"));
+        el.classList.add("is-on");
+        readout.querySelector(".name").textContent = b.name === "—" ? "Untested" : b.name;
+        readout.querySelector(".metric").textContent = b.m;
+        readout.querySelector(".tap").textContent = b.name === "—" ? "Play here to light it" : "Tap another band";
+      });
+      rail.appendChild(el);
+      if (i === 0) el.click();
+    });
+
+    // Lifelong marks trails
+// Complete mark ladders (full data — trail shows key nodes; sheets list all)
+    const paths = {
+      unaided: [
+        { id: "u1", short: "1", title: "First unaided", desc: "Exact with no hints — once.", done: true },
+        { id: "u10", short: "10", title: "Ten unaided", desc: "Exact, no hints — ten times.", done: false, now: true, cur: 3, max: 10 },
+        { id: "u50", short: "50", title: "Fifty unaided", desc: "Cold precision is becoming habit.", done: false },
+        { id: "u100", short: "100", title: "Hundred unaided", desc: "A year of careful placement.", done: false },
+        { id: "u200", short: "200", title: "Two hundred unaided", desc: "Deep unaided bench.", done: false },
+        { id: "u500", short: "500", title: "Five hundred unaided", desc: "Deep unaided fluency.", done: false },
+      ],
+      exact: [
+        { id: "e1", short: "1", title: "Exact", desc: "Land on the true verse or range.", done: true },
+        { id: "e10", short: "10", title: "Ten exacts", desc: "Ten true landings lifetime.", done: true },
+        { id: "e25", short: "25", title: "Twenty-five exacts", desc: "Precision is stacking.", done: false, now: true, cur: 12, max: 25 },
+        { id: "e50", short: "50", title: "Fifty exacts", desc: "Half a hundred true pins.", done: false },
+        { id: "e100", short: "100", title: "Hundred exacts", desc: "A century of true pins.", done: false },
+        { id: "e250", short: "250", title: "Exacting", desc: "250 exact placements.", done: false },
+        { id: "e500", short: "500", title: "Pinpoint", desc: "500 exact placements.", done: false },
+        { id: "e1k", short: "1k", title: "Thousand exacts", desc: "Lifelong precision checkpoint.", done: false },
+        { id: "e2k", short: "2k", title: "Two thousand exacts", desc: "Deep precision archive.", done: false },
+      ],
+      show: [
+        { id: "d1", short: "1", title: "Day one", desc: "Finish your first Daily.", done: true },
+        { id: "d3", short: "3", title: "Three days", desc: "Best streak of three.", done: true },
+        { id: "d7", short: "7", title: "Week of marks", desc: "Best streak of seven days.", done: true },
+        { id: "d14", short: "14", title: "Fortnight", desc: "Best streak of fourteen.", done: false, now: true, cur: 7, max: 14 },
+        { id: "d30", short: "30", title: "Month of marks", desc: "Thirty-day best streak.", done: false },
+        { id: "d100", short: "100", title: "Century streak", desc: "Best streak of 100 days.", done: false },
+        { id: "d200", short: "200", title: "200-day streak", desc: "Best streak of 200.", done: false },
+        { id: "d500", short: "500", title: "500-day streak", desc: "Best streak of 500.", done: false },
+        { id: "dd10", short: "10d", title: "Ten dailies", desc: "Complete 10 dailies.", done: true, cur: 15, max: 10 },
+        { id: "dd50", short: "50d", title: "Fifty dailies", desc: "Complete 50 dailies.", done: false, cur: 15, max: 50 },
+        { id: "dd100", short: "100d", title: "Hundred dailies", desc: "Complete 100 dailies.", done: false },
+        { id: "dd365", short: "365", title: "Year of dailies", desc: "365 Dailies completed — not streak.", done: false },
+        { id: "dd500", short: "500d", title: "500 dailies", desc: "Complete 500 dailies.", done: false },
+        { id: "dd1k", short: "1kd", title: "Thousand dailies", desc: "Complete 1,000 dailies.", done: false },
+      ],
+      close: [
+        { id: "c1", short: "1", title: "Close", desc: "Within a few verses of the truth.", done: true },
+        { id: "c25", short: "25", title: "Twenty-five closes", desc: "25 near-miss placements.", done: false, now: true, cur: 18, max: 25 },
+        { id: "c100", short: "100", title: "Hundred closes", desc: "100 near-miss placements.", done: false },
+        { id: "c200", short: "200", title: "200 closes", desc: "200 near-miss placements.", done: false },
+        { id: "c500", short: "500", title: "500 closes", desc: "500 near-miss placements.", done: false },
+      ],
+      chapter: [
+        { id: "ch1", short: "1", title: "Same chapter", desc: "Guess and truth share book and chapter.", done: true },
+        { id: "ch25", short: "25", title: "Chapter sense", desc: "25 same-chapter landings.", done: true, cur: 28, max: 25 },
+        { id: "ch100", short: "100", title: "Chapter fluent", desc: "100 same-chapter landings.", done: false, now: true, cur: 28, max: 100 },
+        { id: "ch200", short: "200", title: "200 same-chapter", desc: "200 same-chapter landings.", done: false },
+        { id: "ch500", short: "500", title: "500 same-chapter", desc: "500 same-chapter landings.", done: false },
+      ],
+      clean: [
+        { id: "cs1", short: "1", title: "Clean sheet", desc: "A daily where every verse is exact.", done: true },
+        { id: "cs5", short: "5", title: "Five clean sheets", desc: "5 clean-sheet dailies.", done: false, now: true, cur: 2, max: 5 },
+        { id: "cs25", short: "25", title: "25 clean sheets", desc: "25 clean-sheet dailies.", done: false },
+        { id: "cs50", short: "50", title: "50 clean sheets", desc: "50 clean-sheet dailies.", done: false },
+        { id: "cs100", short: "100", title: "100 clean sheets", desc: "100 clean-sheet dailies.", done: false },
+      ],
+      volume: [
+        { id: "m10", short: "10", title: "Ten marks", desc: "Score ten verses across daily and practice.", done: true },
+        { id: "m50", short: "50", title: "Fifty marks", desc: "Score fifty verses.", done: false, now: true, cur: 47, max: 50 },
+        { id: "m100", short: "100", title: "Hundred marks", desc: "Score 100 verses.", done: false },
+        { id: "m250", short: "250", title: "Quarter thousand", desc: "Score 250 verses.", done: false },
+        { id: "m500", short: "500", title: "Five hundred marks", desc: "Score 500 verses.", done: false },
+        { id: "m1k", short: "1k", title: "Thousand marks", desc: "Score 1,000 verses.", done: false },
+        { id: "m2.5k", short: "2.5k", title: "Deep bench", desc: "Score 2,500 verses.", done: false },
+        { id: "m5k", short: "5k", title: "Canon walker", desc: "Score 5,000 verses.", done: false },
+        { id: "m10k", short: "10k", title: "10,000 marks", desc: "Score 10,000 verses.", done: false },
+        { id: "m20k", short: "20k", title: "20,000 marks", desc: "Score 20,000 verses.", done: false },
+      ],
+    };
+    // Trail only shows key nodes; sheets use full path arrays
+    const trailKeys = {
+      unaided: ["u1", "u10", "u50", "u100", "u500"],
+      exact: ["e1", "e10", "e25", "e100", "e1k"],
+      show: ["d1", "d7", "d14", "d30", "dd365"],
+    };
+
+
+    const trailEl = document.getElementById("trail");
+    const face = document.getElementById("checkpoint-face");
+    function showCheckpoint(node) {
+      const status = face.querySelector(".status");
+      const h3 = face.querySelector("h3");
+      const p = face.querySelector("h3 + p");
+      const prog = face.querySelector(".progress");
+      const progFill = prog.querySelector("i");
+      const progLabel = face.querySelector(".progress-label");
+      status.className = "status";
+      if (node.done) {
+        status.textContent = "Passed";
+        status.classList.add("is-done");
+      } else if (node.now) {
+        status.textContent = "Now";
+        status.classList.add("is-now");
+      } else {
+        status.textContent = "Ahead";
+      }
+      h3.textContent = node.title;
+      p.textContent = node.desc;
+      if (node.now && node.max) {
+        prog.hidden = false;
+        progLabel.hidden = false;
+        progFill.style.width = Math.round((node.cur / node.max) * 100) + "%";
+        progLabel.textContent = node.cur + " / " + node.max;
+      } else {
+        prog.hidden = true;
+        progLabel.hidden = true;
+      }
+    }
+    let currentPathKey = "unaided";
+    function trailNodes(pathKey) {
+      const full = paths[pathKey] || [];
+      const keys = trailKeys[pathKey];
+      if (!keys) return full;
+      return keys.map((id) => full.find((n) => n.id === id)).filter(Boolean);
+    }
+    function renderTrail(pathKey) {
+      currentPathKey = pathKey;
+      const nodes = trailNodes(pathKey);
+      trailEl.replaceChildren();
+      nodes.forEach((n, i) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "node";
+        btn.setAttribute("role", "listitem");
+        if (n.done) btn.classList.add("is-done");
+        if (n.now) btn.classList.add("is-now");
+        btn.innerHTML = `<span class="dot">${n.short}</span><span class="lbl">${n.title.split(" ")[0]}</span>`;
+        btn.addEventListener("click", () => {
+          trailEl.querySelectorAll(".node").forEach((x) => x.classList.remove("is-pick"));
+          btn.classList.add("is-pick");
+          showCheckpoint(n);
+        });
+        trailEl.appendChild(btn);
+        if (n.now || (!nodes.some((x) => x.now) && i === 0)) {
+          btn.classList.add("is-pick");
+          showCheckpoint(n);
+        }
+      });
+      // Prefer now as selected face
+      const now = nodes.find((x) => x.now) || nodes.find((x) => !x.done) || nodes[0];
+      const idx = nodes.indexOf(now);
+      trailEl.querySelectorAll(".node").forEach((x) => x.classList.remove("is-pick"));
+      const pick = trailEl.children[idx];
+      if (pick) {
+        pick.classList.add("is-pick");
+        showCheckpoint(now);
+      }
+    }
+    document.querySelectorAll(".path-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".path-tab").forEach((t) => {
+          t.classList.toggle("is-on", t === tab);
+          t.setAttribute("aria-selected", t === tab ? "true" : "false");
+        });
+        renderTrail(tab.dataset.path);
+      });
+    });
+    renderTrail("unaided");
+
+    // Far choices → set train CTA (+ index meta)
+    const farNote = document.getElementById("far-note");
+    const trainH = document.getElementById("train-headline");
+    const trainS = document.getElementById("train-sub");
+    const cta = document.getElementById("cta-train");
+    const ctaToc = document.getElementById("cta-train-toc");
+    const tocTrainMeta = document.getElementById("toc-train-meta");
+    function setTrainTarget(book) {
+      const label = book ? "Practice " + book : "Train unaided exacts";
+      const head = book ? "Train " + book : "Train the gap";
+      const sub = book
+        ? "Practice packs that bias toward " + book + " — then come back to unaided exacts."
+        : "Unlimited Practice rounds aimed at unaided exacts — or keep the free Daily cadence.";
+      trainH.textContent = head;
+      trainS.textContent = sub;
+      cta.textContent = label;
+      ctaToc.textContent = label;
+      tocTrainMeta.textContent = book || "unaided";
+    }
+    document.querySelectorAll("#far-choices .choice").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("#far-choices .choice").forEach((b) => b.classList.remove("is-pick"));
+        btn.classList.add("is-pick");
+        const book = btn.dataset.book;
+        farNote.textContent = "Locked in · " + book;
+        setTrainTarget(book);
+      });
+    });
+
+    // Dots + scroll spy
+    const deck = document.getElementById("deck");
+    const cards = [...deck.querySelectorAll(".card")];
+    const dots = document.getElementById("dots");
+    function goTo(i) {
+      const el = cards[i];
+      if (el) el.scrollIntoView({ behavior: "smooth" });
+    }
+    cards.forEach((card, i) => {
+      const d = document.createElement("button");
+      d.type = "button";
+      d.setAttribute("aria-label", i === cards.length - 1 ? "Index" : "Card " + (i + 1));
+      if (i === 0) d.classList.add("on");
+      d.addEventListener("click", () => goTo(i));
+      dots.appendChild(d);
+    });
+    const dotBtns = [...dots.querySelectorAll("button")];
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          const i = Number(e.target.dataset.i);
+          dotBtns.forEach((d, j) => d.classList.toggle("on", j === i));
+        }
+      },
+      { root: deck, threshold: 0.55 }
+    );
+    cards.forEach((c) => io.observe(c));
+
+    // TOC jumps
+    document.querySelectorAll(".toc-row[data-goto]").forEach((row) => {
+      row.addEventListener("click", () => goTo(Number(row.dataset.goto)));
+    });
+
+
+    // —— Full-data sheets ——
+    const deckEl = document.getElementById("deck");
+    function openSheet(id, opts = {}) {
+      const sheet = document.getElementById("sheet-" + id);
+      if (!sheet) return;
+      // populate
+      if (id === "stats") fillStats();
+      if (id === "books") fillBooks(opts.filter || "all");
+      if (id === "marks") fillMarks(currentPathKey);
+      if (id === "marks-all") fillMarksAll();
+      if (id === "earned") fillEarned();
+      if (id === "genres") fillGenres();
+      sheet.classList.add("is-open");
+      deckEl.classList.add("is-locked");
+      sheet.querySelector(".sheet-close")?.focus();
+    }
+    function closeSheets() {
+      document.querySelectorAll(".sheet.is-open").forEach((s) => s.classList.remove("is-open"));
+      deckEl.classList.remove("is-locked");
+    }
+    document.querySelectorAll(".sheet-close").forEach((b) => b.addEventListener("click", closeSheets));
+    document.querySelectorAll("[data-sheet]").forEach((b) => {
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openSheet(b.dataset.sheet, { filter: b.dataset.filter });
+      });
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeSheets();
+    });
+
+    function rowHTML(k, v, cls = "") {
+      return `<div class="data-row ${cls}"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+    }
+
+    function genreStats(key) {
+      const books = ALL_BOOKS.filter((b) => b.genre === key);
+      const tested = books.filter((b) => b.rounds > 0);
+      const rounds = tested.reduce((s, b) => s + b.rounds, 0);
+      const exacts = tested.reduce((s, b) => s + b.exacts, 0);
+      const unaided = tested.reduce((s, b) => s + b.unaided, 0);
+      const closes = tested.reduce((s, b) => s + b.closes, 0);
+      const sameCh = tested.reduce((s, b) => s + b.sameCh, 0);
+      const hints = tested.reduce((s, b) => s + b.hints, 0);
+      const misses = tested.map((b) => b.chOff).filter((n) => n != null);
+      const median = misses.length
+        ? misses.slice().sort((a, b) => a - b)[Math.floor(misses.length / 2)]
+        : null;
+      const far = tested.filter((b) => b.band === "far").length;
+      const close = tested.filter((b) => b.band === "close").length;
+      return {
+        books, tested, rounds, exacts, unaided, closes, sameCh, hints, median, far, close,
+        untested: books.length - tested.length,
+      };
+    }
+
+    function fillStats() {
+      const body = document.getElementById("sheet-stats-body");
+      const genreOpts = GENRES.map(
+        (g) => `<option value="${g.key}">${g.name}</option>`
+      ).join("");
+      const bookOpts = ALL_BOOKS.map(
+        (b) => `<option value="${b.name}">${b.name}</option>`
+      ).join("");
+
+      body.innerHTML = `
+        <p class="sheet-lead">Every metric — overall, by genre, by book.</p>
+        <p class="sheet-note">Pick a genre or book for full detail. Nothing is preview-only.</p>
+
+        <p class="group-h">Overall</p>
+        <div class="data-table">${FULL_STATS.map(([k, v]) => rowHTML(k, v)).join("")}</div>
+
+        <p class="group-h">By genre</p>
+        <div class="picker-row">
+          <label for="stat-genre">Genre</label>
+          <select id="stat-genre">
+            <option value="">Select genre…</option>
+            ${genreOpts}
+          </select>
+        </div>
+        <div class="detail-panel" id="genre-detail" hidden></div>
+
+        <p class="group-h">By book</p>
+        <div class="picker-row">
+          <label for="stat-book">Book</label>
+          <select id="stat-book">
+            <option value="">Select book…</option>
+            ${bookOpts}
+          </select>
+        </div>
+        <div class="detail-panel" id="book-detail" hidden></div>
+      `;
+
+      const genreSel = body.querySelector("#stat-genre");
+      const bookSel = body.querySelector("#stat-book");
+      const genreDetail = body.querySelector("#genre-detail");
+      const bookDetail = body.querySelector("#book-detail");
+
+      genreSel.addEventListener("change", () => {
+        const key = genreSel.value;
+        if (!key) {
+          genreDetail.hidden = true;
+          genreDetail.innerHTML = "";
+          return;
+        }
+        const g = GENRES.find((x) => x.key === key);
+        const s = genreStats(key);
+        const rate = s.rounds ? Math.round((s.exacts / s.rounds) * 100) : null;
+        const uRate = s.exacts ? Math.round((s.unaided / s.exacts) * 100) : null;
+        // Sync book select to first book in genre (optional clarity)
+        genreDetail.hidden = false;
+        genreDetail.innerHTML = `
+          <h3>${g.name}</h3>
+          <p class="detail-sub">${s.tested.length} tested · ${s.untested} untested · ${s.books.length} books total</p>
+          <div class="data-table">
+            ${rowHTML("Rounds", String(s.rounds))}
+            ${rowHTML("Exact landings", String(s.exacts))}
+            ${rowHTML("Exact rate", rate == null ? "—" : rate + "%")}
+            ${rowHTML("Unaided exacts", String(s.unaided))}
+            ${rowHTML("Unaided rate (of exacts)", uRate == null ? "—" : uRate + "%")}
+            ${rowHTML("Close landings", String(s.closes))}
+            ${rowHTML("Same-chapter landings", String(s.sameCh))}
+            ${rowHTML("Hints used", String(s.hints))}
+            ${rowHTML("Median miss (chapters)", s.median == null ? "—" : "~" + s.median)}
+            ${rowHTML("Usually close (books)", String(s.close))}
+            ${rowHTML("Often far (books)", String(s.far))}
+            ${rowHTML("Not tested (books)", String(s.untested))}
+          </div>
+          <p class="group-h">Books in ${g.name}</p>
+          <div class="data-table">
+            ${s.books.map((b) => rowHTML(b.name, b.m)).join("")}
+          </div>
+        `;
+      });
+
+      bookSel.addEventListener("change", () => {
+        const name = bookSel.value;
+        if (!name) {
+          bookDetail.hidden = true;
+          bookDetail.innerHTML = "";
+          return;
+        }
+        const b = ALL_BOOKS.find((x) => x.name === name);
+        const g = GENRES.find((x) => x.key === b.genre);
+        bookDetail.hidden = false;
+        if (!b.rounds) {
+          bookDetail.innerHTML = `
+            <h3>${b.name}</h3>
+            <p class="detail-sub">${g.name} · not tested yet</p>
+            <div class="data-table">
+              ${rowHTML("Status", "not tested")}
+              ${rowHTML("Genre", g.name)}
+              ${rowHTML("Rounds", "0")}
+              ${rowHTML("Exact / unaided / close", "—")}
+              ${rowHTML("Median miss", "—")}
+              ${rowHTML("Hints", "—")}
+            </div>
+            <p class="sheet-note" style="margin-top:12px">Play Daily or Practice that lands here to write stats.</p>
+          `;
+          return;
+        }
+        bookDetail.innerHTML = `
+          <h3>${b.name}</h3>
+          <p class="detail-sub">${g.name} · ${b.band === "close" ? "usually close" : "often far"}</p>
+          <div class="data-table">
+            ${rowHTML("Rounds", String(b.rounds))}
+            ${rowHTML("Exact landings", String(b.exacts))}
+            ${rowHTML("Exact rate", b.exactRate + "%")}
+            ${rowHTML("Unaided exacts", String(b.unaided))}
+            ${rowHTML("Unaided rate (of exacts)", b.exacts ? Math.round((b.unaided / b.exacts) * 100) + "%" : "—")}
+            ${rowHTML("Close landings", String(b.closes))}
+            ${rowHTML("Same-chapter landings", String(b.sameCh))}
+            ${rowHTML("Chapter rate", Math.round((b.sameCh / b.rounds) * 100) + "%")}
+            ${rowHTML("Hints used", String(b.hints))}
+            ${rowHTML("Median miss (chapters)", "~" + b.medianMiss)}
+            ${rowHTML("Band", b.band)}
+            ${rowHTML("Genre", g.name)}
+          </div>
+        `;
+        // Keep genre picker in sync for context
+        if (genreSel.value !== b.genre) {
+          genreSel.value = b.genre;
+          genreSel.dispatchEvent(new Event("change"));
+        }
+      });
+    }
+    function fillBooks(filter) {
+
+      const body = document.getElementById("sheet-books-body");
+      let list = ALL_BOOKS.slice();
+      let title = "All 66 books";
+      if (filter === "far") {
+        list = list.filter((b) => b.band === "far");
+        title = `Often far · ${list.length} books`;
+      } else if (filter === "close") {
+        list = list.filter((b) => b.band === "close");
+        title = `Usually close · ${list.length} books`;
+      } else if (filter === "untested") {
+        list = list.filter((b) => b.band === "untested");
+        title = `Not tested · ${list.length} books`;
+      }
+      document.getElementById("sheet-books-title").textContent =
+        filter === "all" || !filter ? "All books" : filter;
+      const groups = {};
+      for (const b of list) {
+        (groups[b.genre] = groups[b.genre] || []).push(b);
+      }
+      let html = `<p class="sheet-lead">${title}</p>
+        <p class="sheet-note">Complete catalog. Map card is the instrument; this is the ledger.</p>`;
+      const order = ["law","history","poetry","prophets","gospels","epistles"];
+      for (const g of order) {
+        if (!groups[g]) continue;
+        html += `<p class="group-h">${g}</p><div class="data-table">`;
+        for (const b of groups[g]) {
+          html += rowHTML(b.name, b.m);
+        }
+        html += `</div>`;
+      }
+      // unfiltered: also show counts
+      if (!filter || filter === "all") {
+        const far = ALL_BOOKS.filter((b) => b.band === "far").length;
+        const close = ALL_BOOKS.filter((b) => b.band === "close").length;
+        const un = ALL_BOOKS.filter((b) => b.band === "untested").length;
+        html = `<p class="sheet-lead">All 66 books</p>
+          <p class="sheet-note">${close} usually close · ${far} often far · ${un} not tested</p>` + html.replace(`<p class="sheet-lead">${title}</p>
+        <p class="sheet-note">Complete catalog. Map card is the instrument; this is the ledger.</p>`, "");
+      }
+      body.innerHTML = html;
+    }
+    function markRows(nodes) {
+      return nodes.map((n) => {
+        let v = n.done ? "passed" : n.now && n.max ? `${n.cur} / ${n.max}` : n.max && n.cur != null ? `${n.cur} / ${n.max}` : "ahead";
+        let cls = n.done ? "is-done" : n.now ? "is-now" : "";
+        return rowHTML(n.title, v, cls);
+      }).join("");
+    }
+    function fillMarks(pathKey) {
+      const body = document.getElementById("sheet-marks-body");
+      const nodes = paths[pathKey] || [];
+      const labels = { unaided: "Unaided", exact: "Exact", show: "Show up", close: "Close", chapter: "Chapter", clean: "Clean sheet", volume: "Volume" };
+      document.getElementById("sheet-marks-title").textContent = labels[pathKey] || "Marks";
+      body.innerHTML = `<p class="sheet-lead">${labels[pathKey] || pathKey} · full path</p>
+        <p class="sheet-note">${nodes.length} checkpoints. Trail on the deck is a summary of key nodes only.</p>
+        <div class="data-table">${markRows(nodes)}</div>
+        <button type="button" class="linkish" data-sheet="marks-all">Every mark · all paths</button>`;
+      body.querySelector("[data-sheet]")?.addEventListener("click", () => openSheet("marks-all"));
+    }
+    function fillMarksAll() {
+      const body = document.getElementById("sheet-marks-all-body");
+      const order = ["unaided","exact","close","chapter","clean","show","volume"];
+      const labels = { unaided: "Unaided", exact: "Exact", close: "Close", chapter: "Chapter", clean: "Clean sheets", show: "Show up", volume: "Volume / marks" };
+      let total = 0;
+      let html = `<p class="sheet-lead">Every mark on every path</p>`;
+      for (const k of order) {
+        const nodes = paths[k];
+        total += nodes.length;
+        html += `<p class="group-h">${labels[k]} · ${nodes.length}</p><div class="data-table">${markRows(nodes)}</div>`;
+      }
+      html = html.replace("Every mark on every path", `Every mark · ${total} checkpoints`);
+      body.innerHTML = html;
+    }
+    function fillEarned() {
+      const body = document.getElementById("sheet-earned-body");
+      const earned = [];
+      for (const [k, nodes] of Object.entries(paths)) {
+        for (const n of nodes) if (n.done) earned.push({ ...n, path: k });
+      }
+      body.innerHTML = `<p class="sheet-lead">Earned · ${earned.length}</p>
+        <p class="sheet-note">Passed checkpoints only — complete log.</p>
+        <div class="data-table">${earned.map((n) => rowHTML(n.title, "passed", "is-done")).join("")}</div>`;
+    }
+    function fillGenres() {
+      const body = document.getElementById("sheet-genres-body");
+      let html = `<p class="sheet-lead">All six genres</p><div class="data-table">`;
+      for (const g of GENRES) {
+        const books = ALL_BOOKS.filter((b) => b.genre === g.key);
+        const tested = books.filter((b) => b.rounds > 0).length;
+        html += rowHTML(g.name, `${g.miss} · ${tested}/${books.length} books`);
+      }
+      html += `</div>`;
+      body.innerHTML = html;
+    }
+
+    function toggleTheme() {
+      const h = document.documentElement;
+      h.setAttribute("data-theme", h.getAttribute("data-theme") === "dark" ? "light" : "dark");
+    }
+  </script>
+</body>
+</html>
