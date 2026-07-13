@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "Versemark",
+    "slug": "versemark",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#faf8f4"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.versemark.mobile"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#faf8f4"
+      },
+      "package": "app.versemark.mobile"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

@@ -4,70 +4,53 @@ A "place the marker" Scripture familiarity game. A verse appears; you drop a pin
 
 The goal is **familiarity**: building the mental map of where things live in Scripture, not trivia recall.
 
+## Monorepo (Expo-first)
+
+| Package | Role |
+| --- | --- |
+| `@versemark/core` | Shared pure domain (scoring, daily, game, achievements, mastery, books/axis, state + storage port) |
+| `@versemark/mobile` | **Primary mobile client** — Expo / React Native |
+| `@versemark/web` | Vite static PWA + Canvas timeline (web shell) |
+
+See [docs/monorepo.md](docs/monorepo.md) for the share boundary (what is shared vs platform-only).
+
 ## Modes
 
-- **Daily**: one puzzle per day, same for everyone, seeded from the date. Wordle-class pure-text share (star + date + scores + site URL).
+- **Daily**: one puzzle per day, same for everyone, seeded from the date. Wordle-class pure-text share.
 - **Endless practice**: unlimited rounds for reps.
 
 ## Quick start
 
 ```bash
 npm install
-npm run build:data   # if regenerating pool/verses from monorepo sources
-npm run dev          # http://127.0.0.1:5173
-npm test
-npm run build        # static dist/
+
+# Mobile (Expo)
+npm run mobile
+
+# Web (Vite)
+npm run web
+
+# Shared domain tests
+npm run test:core
+npm test                 # core + web platform tests
+npm run typecheck        # core + web + mobile
+npm run build            # web production static → apps/web/dist
 ```
 
-Shipped data under `public/data/` (pool, BSB verse/paragraph text for pool entries, book axis metadata) is already committed so the app runs offline without `selah-tools` checked out.
+Shipped data under `apps/web/public/data/` and `packages/core/src/data/` is committed so the app runs offline without external monorepo tools.
 
 ## Architecture (summary)
 
 | Area | Choice |
 | --- | --- |
-| Stack | Vite + TypeScript, static only |
-| Board | Canvas 2D canon timeline; orientation transform (vertical portrait / horizontal wide) |
-| UI | DOM cards, hints, score, share |
-| Daily | Epoch `2026-08-01` local = #1; seed `"versemark#" + N` → xmur3 → mulberry32; weighted pool + 180 no-repeat window |
-| Score | `round(1000 * 0.5^(d/40))` × hint multiplier (×3 / ×2 / ×1) |
-| Text | BSB (default) + KJV (public domain); pool snapshot from Exedra topic rankings |
-| State | `localStorage` for daily results / streak |
-| URL | `https://versemark.app` (site / optional deep links; included at end of share text) |
+| Layout | npm workspaces monorepo |
+| Domain | `@versemark/core` — no DOM / Canvas / localStorage |
+| Mobile | Expo + React Native; storage via `KvStore` (memory now, AsyncStorage later) |
+| Web | Vite + TypeScript, Canvas 2D timeline, localStorage adapter |
+| Daily | Epoch `2026-08-01` local = #1; seed `"versemark#" + N` |
+| Score | distance × hint multiplier (see core `scoring.ts`) |
+| State | Durable counters/rollups; platform injects persistence |
 
-## Production deploy
+## Production deploy (web)
 
-| Piece | Status |
-| --- | --- |
-| Domain | `versemark.app` on Porkbun (expires 2027-07-10) |
-| DNS | Apex **A** → `216.198.79.1` (Vercel) |
-| Host | Vercel project **`versemark`** → team **`dpshde`** (GitHub `dpshde/versemark`) |
-| Config | `vercel.json` (Vite build → `dist`, cache headers) |
-| App URL in code | `APP_URL` in `src/lib/share.ts` (appended to share text) |
-| Analytics | Fathom site **`IFLWYVVU`** (`index.html` embed; dashboard site “Versemark”) |
-
-Ship latest `main` (or `vercel --prod` from a clean tree) so production HTML says **Versemark**, not the older Canonmark build.
-
-```bash
-npm test && npm run build
-git push origin main   # triggers Vercel production if Git integration is on
-# or: vercel --prod --scope dpshde
-```
-
-Decisions live in [`docs/decisions/`](docs/decisions/README.md). Art direction in [`docs/design/`](docs/design/README.md). Achievement development and data-safety rules are in [`docs/achievements.md`](docs/achievements.md).
-
-## Data rebuild
-
-`npm run build:data` reads (when present):
-
-- `../selah-tools/apps/exedra-search/data/topic-verse-rankings.browser.json`
-- `../selah-tools/apps/exedra-search/data/bsb.browser.jsonl`
-- `../grab-bcv/src/para-data.json`
-
-and writes `public/data/{books,pool,verses,paragraphs}.json` plus `src/data/{books,pool}.json` for unit tests.
-
-## Principles
-
-- Mobile first: portrait touch play is the design origin (vertical timeline, thumb-scrolled); desktop adapts.
-- No backend. Static site, all state in the client (localStorage).
-- Bible text: Berean Standard Bible (public domain), bundled at build time.
-- No image assets — everything is CSS and Canvas. Lean stack; expand only as needed.
+Vercel builds `@versemark/web` (`vercel.json` → `apps/web/dist`).

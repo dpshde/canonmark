@@ -43,3 +43,7 @@ Quiet, literary, focused. A calm daily ritual, not a spectacle. Warm without bei
 ## Accessibility & Inclusion
 
 WCAG AA contrast on all text. Respect `prefers-reduced-motion` (no ambient loops, minimal transitions). Touch targets ≥ 44px; primary actions reachable one-handed in the bottom third. Avoid encoding critical state only in color (hint multiplier and score also use text).
+
+## Platform
+
+Expo/React Native is the primary mobile client (`apps/mobile`). Shared game domain lives in `@versemark/core`. Web PWA remains at `apps/web`.
